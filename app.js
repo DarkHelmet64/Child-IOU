@@ -508,7 +508,7 @@ function openQrModal(url, title) {
   const overlay = buildModal(`
     <div class="qr-wrap">
       <h2>${escapeHtml(title)}</h2>
-      ${hasQr ? `<canvas id="qr-canvas"></canvas>` : `<p class="hint">The QR code library didn't load, but you can still copy or print the link below.</p>`}
+      ${hasQr ? `<canvas id="qr-canvas"></canvas>` : `<p class="hint">The QR code image couldn't load, but you can still copy or print the link below.</p>`}
       <div class="qr-link">${escapeHtml(url)}</div>
       <div class="qr-actions no-print">
         <button class="secondary small" id="copy-link-btn">Copy link</button>
@@ -521,8 +521,9 @@ function openQrModal(url, title) {
     </div>
   `);
 
+  let canvas = null;
   if (hasQr) {
-    const canvas = overlay.querySelector("#qr-canvas");
+    canvas = overlay.querySelector("#qr-canvas");
     window.QRCode.toCanvas(canvas, url, { width: 240, margin: 2 }, (err) => {
       if (err) console.error(err);
     });
@@ -539,7 +540,54 @@ function openQrModal(url, title) {
     showToast("Link copied");
   });
   overlay.querySelector("#print-btn").addEventListener("click", () => {
-    window.print();
+    openPrintableWindow(title, url, canvas);
   });
   overlay.querySelector("#modal-close").addEventListener("click", () => overlay.remove());
+}
+
+// Prints from a dedicated, minimal page in a new tab rather than the app itself.
+// This is far more reliable across browsers than calling window.print() on the
+// live app page, and still works even when the QR image itself failed to load.
+function openPrintableWindow(title, url, canvas) {
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    // Pop-up blocked -- fall back to printing the current page (styled by the
+    // @media print rules in style.css to show just this modal's contents).
+    window.print();
+    return;
+  }
+
+  const imgTag = canvas ? `<img src="${canvas.toDataURL("image/png")}" alt="QR code" />` : "";
+  printWindow.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; padding: 48px 24px; }
+          h1 { font-size: 1.3rem; margin-bottom: 24px; }
+          img { width: 280px; height: 280px; }
+          p { word-break: break-all; color: #555; margin-top: 20px; font-size: 0.95rem; }
+          .note { color: #888; font-size: 0.8rem; margin-top: 32px; }
+        </style>
+      </head>
+      <body>
+        <h1>${escapeHtml(title)}</h1>
+        ${imgTag}
+        <p>${escapeHtml(url)}</p>
+        <p class="note">If a print dialog didn't open automatically, use your browser's Print option.</p>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  printWindow.focus();
+  setTimeout(() => {
+    try {
+      printWindow.print();
+    } catch {
+      // Ignore -- the note above tells the user how to print manually.
+    }
+  }, 250);
 }

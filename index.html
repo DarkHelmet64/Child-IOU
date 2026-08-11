@@ -13,7 +13,29 @@
     <p class="loading">Loading…</p>
   </div>
 
-  <script src="https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <script>
+    // Some networks/devices block one CDN but not another, so try a couple of
+    // mirrors that serve the exact same "qrcode" npm package before giving up.
+    // app.js checks `window.QRCode` lazily (only when the QR modal is opened),
+    // so it's fine for this to still be loading when the page first appears.
+    (function () {
+      var sources = [
+        "https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js",
+        "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js",
+        "https://fastly.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js",
+      ];
+      function tryLoad(index) {
+        if (index >= sources.length) return;
+        var script = document.createElement("script");
+        script.src = sources[index];
+        script.onerror = function () {
+          tryLoad(index + 1);
+        };
+        document.head.appendChild(script);
+      }
+      tryLoad(0);
+    })();
+  </script>
   <script type="module" src="app.js"></script>
 </body>
 </html>
