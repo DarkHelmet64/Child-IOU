@@ -504,30 +504,42 @@ function openTxModal(accountId, sign) {
 // ---------------------------------------------------------------------------
 
 function openQrModal(url, title) {
+  const hasQr = !!window.QRCode;
   const overlay = buildModal(`
-    <h2>${escapeHtml(title)}</h2>
     <div class="qr-wrap">
-      <canvas id="qr-canvas"></canvas>
+      <h2>${escapeHtml(title)}</h2>
+      ${hasQr ? `<canvas id="qr-canvas"></canvas>` : `<p class="hint">The QR code library didn't load, but you can still copy or print the link below.</p>`}
       <div class="qr-link">${escapeHtml(url)}</div>
-      <button class="secondary small" id="copy-link-btn">Copy link</button>
+      <div class="qr-actions no-print">
+        <button class="secondary small" id="copy-link-btn">Copy link</button>
+        <button class="secondary small" id="print-btn">Print</button>
+        ${hasQr ? `<button class="secondary small" id="download-btn">Download PNG</button>` : ""}
+      </div>
     </div>
-    <div class="modal-actions">
+    <div class="modal-actions no-print">
       <button id="modal-close">Close</button>
     </div>
   `);
 
-  const canvas = overlay.querySelector("#qr-canvas");
-  if (window.QRCode) {
-    window.QRCode.toCanvas(canvas, url, { width: 220, margin: 1 }, (err) => {
+  if (hasQr) {
+    const canvas = overlay.querySelector("#qr-canvas");
+    window.QRCode.toCanvas(canvas, url, { width: 240, margin: 2 }, (err) => {
       if (err) console.error(err);
     });
-  } else {
-    canvas.remove();
+    overlay.querySelector("#download-btn").addEventListener("click", () => {
+      const link = document.createElement("a");
+      link.download = "family-bank-qr-code.png";
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    });
   }
 
   overlay.querySelector("#copy-link-btn").addEventListener("click", async () => {
     await copyToClipboard(url);
     showToast("Link copied");
+  });
+  overlay.querySelector("#print-btn").addEventListener("click", () => {
+    window.print();
   });
   overlay.querySelector("#modal-close").addEventListener("click", () => overlay.remove());
 }
