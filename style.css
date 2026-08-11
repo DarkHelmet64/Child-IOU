@@ -279,6 +279,13 @@ button:disabled { opacity: 0.5; cursor: default; }
   margin-bottom: 12px;
 }
 
+.qr-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
 .hint {
   font-size: 0.8rem;
   color: var(--muted);
@@ -296,4 +303,38 @@ button:disabled { opacity: 0.5; cursor: default; }
   border-radius: 20px;
   font-size: 0.9rem;
   z-index: 100;
+}
+
+/* When printing (e.g. the "Print" button in the QR modal), show only the
+   QR code, its title, and the link -- hide the rest of the page and all
+   buttons. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .qr-wrap,
+  .qr-wrap * {
+    visibility: visible;
+  }
+  .overlay {
+    position: static;
+    background: none;
+  }
+  .modal {
+    position: static;
+    box-shadow: none;
+    padding: 0;
+    background: none;
+  }
+  .qr-wrap {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .no-print {
+    display: none !important;
+  }
 }
