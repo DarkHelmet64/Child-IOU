@@ -9,6 +9,7 @@ import {
   getDoc,
   onSnapshot,
   query,
+  where,
   orderBy,
   limit,
   serverTimestamp,
@@ -333,8 +334,6 @@ function renderNewAccountView() {
     const accountRef = await addDoc(collection(db, "accounts"), {
       name,
       balanceCents: startingCents,
-      totalInCents: startingCents > 0 ? startingCents : 0,
-      totalOutCents: 0,
       createdAt: serverTimestamp(),
     });
 
@@ -379,8 +378,6 @@ function renderAccountView(id) {
 function renderAccountBody(id, data) {
   // Only rebuild the shell once; called on every balance update, so keep it idempotent.
   const negative = data.balanceCents < 0 ? "negative" : "";
-  const inCents = data.totalInCents || 0;
-  const outCents = data.totalOutCents || 0;
 
   if (!document.getElementById("hero-amount")) {
     $app.innerHTML = `
@@ -394,7 +391,7 @@ function renderAccountBody(id, data) {
         <button class="subtract-btn" id="subtract-btn">&minus; Subtract</button>
       </div>
       <div class="card pie-card">
-        <div class="section-title" style="margin-top:0">Money in vs. money out</div>
+        <div class="section-title" style="margin-top:0">Money in vs. money out (this month)</div>
         <div class="pie-row">
           <div class="pie-chart" id="pie-chart"></div>
           <div class="pie-legend">
@@ -415,19 +412,41 @@ function renderAccountBody(id, data) {
     document.getElementById("delete-btn").addEventListener("click", () => deleteAccount(id, data.name));
 
     listenTransactions(id);
+    listenMonthlyTotals(id);
   }
 
   document.getElementById("hero-name").textContent = data.name;
   const amountEl = document.getElementById("hero-amount");
   amountEl.textContent = formatUSD(data.balanceCents);
   amountEl.className = `amount ${negative}`;
+}
 
-  const total = inCents + outCents;
-  const inPct = total > 0 ? (inCents / total) * 100 : 0;
-  document.getElementById("pie-chart").style.background =
-    total > 0 ? `conic-gradient(var(--green) 0% ${inPct}%, var(--red) ${inPct}% 100%)` : "var(--border)";
-  document.getElementById("pie-in").textContent = formatUSD(inCents);
-  document.getElementById("pie-out").textContent = formatUSD(outCents);
+function startOfMonth() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+function listenMonthlyTotals(id) {
+  const monthQuery = query(
+    collection(db, "accounts", id, "transactions"),
+    where("createdAt", ">=", startOfMonth())
+  );
+  onSnapshot(monthQuery, (snap) => {
+    let inCents = 0;
+    let outCents = 0;
+    snap.forEach((docSnap) => {
+      const amount = docSnap.data().amountCents;
+      if (amount >= 0) inCents += amount;
+      else outCents += Math.abs(amount);
+    });
+
+    const total = inCents + outCents;
+    const inPct = total > 0 ? (inCents / total) * 100 : 0;
+    document.getElementById("pie-chart").style.background =
+      total > 0 ? `conic-gradient(var(--green) 0% ${inPct}%, var(--red) ${inPct}% 100%)` : "var(--border)";
+    document.getElementById("pie-in").textContent = formatUSD(inCents);
+    document.getElementById("pie-out").textContent = formatUSD(outCents);
+  });
 }
 
 function listenTransactions(id) {
@@ -515,10 +534,7 @@ function openTxModal(accountId, sign) {
 
     const signedCents = cents * sign;
     const batch = writeBatch(db);
-    batch.update(doc(db, "accounts", accountId), {
-      balanceCents: increment(signedCents),
-      [isAdd ? "totalInCents" : "totalOutCents"]: increment(Math.abs(signedCents)),
-    });
+    batch.update(doc(db, "accounts", accountId), { balanceCents: increment(signedCents) });
     batch.set(doc(collection(db, "accounts", accountId, "transactions")), {
       amountCents: signedCents,
       note: note || (isAdd ? "Deposit" : "Withdrawal"),

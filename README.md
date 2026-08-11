@@ -2,9 +2,9 @@
 
 A free, pretend "bank account" tracker for kids. One QR code / link opens
 the app, which shows every child's balance and transaction history, plus a
-simple pie chart of money in vs. money out for each one. The balance updates
-live on every device, since it's backed by a small free cloud database —
-nothing connects to a real bank.
+simple pie chart of that month's money in vs. money out for each one. The
+balance updates live on every device, since it's backed by a small free
+cloud database — nothing connects to a real bank.
 
 No build step, no framework — plain HTML/CSS/JS, hosted for free on GitHub
 Pages, data stored for free in Firebase Firestore.
