@@ -85,6 +85,9 @@ button, .btn {
   font-weight: 600;
   background: var(--brand);
   color: white;
+  display: inline-block;
+  text-decoration: none;
+  box-sizing: border-box;
 }
 
 button:active, .btn:active { background: var(--brand-dark); }
@@ -166,6 +169,64 @@ button:disabled { opacity: 0.5; cursor: default; }
 .add-btn:active { background: #157f4a; }
 .subtract-btn { background: var(--red); }
 .subtract-btn:active { background: #ad2c2f; }
+
+.primary-action {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-top: 10px;
+}
+
+.single-action {
+  text-align: center;
+  margin: 16px 0;
+}
+
+.pie-card {
+  margin-top: 14px;
+}
+
+.pie-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.pie-chart {
+  flex-shrink: 0;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.pie-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pie-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+}
+
+.pie-legend-item strong {
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot.in { background: var(--green); }
+.dot.out { background: var(--red); }
 
 .section-title {
   font-size: 0.85rem;
