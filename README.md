@@ -29,9 +29,16 @@ Pages, data stored for free in Firebase Firestore.
    (the free "Spark" plan is all you need).
 2. In the project, click the **Web** icon (`</>`) to register a new web app.
    You don't need Firebase Hosting for this — just registering the app.
-3. Copy the `firebaseConfig` object it shows you.
-4. Paste those values into `firebase-config.js` in this repo, replacing the
-   placeholder values.
+3. Firebase will show you a code snippet with an `import ... from "firebase/app"`
+   line and a `const firebaseConfig = { ... }` object. **Only copy the values
+   inside `firebaseConfig`** (apiKey, authDomain, projectId, etc.) — ignore
+   the `import` line and the `initializeApp(...)` call, those are for a
+   different (bundler-based) project setup and will break this site if pasted
+   in as-is.
+4. Open `firebase-config.js` in this repo and replace just the placeholder
+   values inside `export const firebaseConfig = { ... }` with the ones you
+   copied. Leave the `export const firebaseConfig = {` line and the file
+   structure as they are.
 
 ### 2. Turn on Firestore
 
