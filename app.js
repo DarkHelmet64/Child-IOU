@@ -393,8 +393,12 @@ function renderAccountBody(id, data) {
       <div class="card pie-card">
         <div class="section-title" style="margin-top:0">Money in vs. money out (this month)</div>
         <div class="pie-row">
-          <div class="pie-chart" id="pie-chart"></div>
-          <div class="pie-legend">
+          <svg viewBox="0 0 36 36" class="pie-chart-svg" id="pie-chart-svg">
+            <circle cx="18" cy="18" r="16" fill="var(--red)"></circle>
+            <path id="pie-chart-fg" fill="var(--green)" d=""></path>
+          </svg>
+          <p class="pie-empty" id="pie-empty" style="display:none">No activity yet this month.</p>
+          <div class="pie-legend" id="pie-legend">
             <div class="pie-legend-item"><span class="dot in"></span>In <strong id="pie-in"></strong></div>
             <div class="pie-legend-item"><span class="dot out"></span>Out <strong id="pie-out"></strong></div>
           </div>
@@ -426,6 +430,28 @@ function startOfMonth() {
   return new Date(now.getFullYear(), now.getMonth(), 1);
 }
 
+// Builds an SVG path for a pie wedge covering `pct` percent of the circle,
+// starting at 12 o'clock and sweeping clockwise. Drawn over a full circle in
+// the "out" color, so the uncovered remainder reads as the other slice.
+function pieSlicePath(pct) {
+  const cx = 18;
+  const cy = 18;
+  const r = 16;
+  if (pct <= 0.01) return "";
+  if (pct >= 99.99) {
+    // A single arc can't describe a full circle, so draw it as two halves.
+    return `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx} ${cy + r} A ${r} ${r} 0 1 1 ${cx} ${cy - r} Z`;
+  }
+  const point = (percent) => {
+    const angle = ((percent * 3.6 - 90) * Math.PI) / 180;
+    return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+  };
+  const start = point(0);
+  const end = point(pct);
+  const largeArcFlag = pct > 50 ? 1 : 0;
+  return `M ${cx} ${cy} L ${start.x} ${start.y} A ${r} ${r} 0 ${largeArcFlag} 1 ${end.x} ${end.y} Z`;
+}
+
 function listenMonthlyTotals(id) {
   const monthQuery = query(
     collection(db, "accounts", id, "transactions"),
@@ -442,8 +468,13 @@ function listenMonthlyTotals(id) {
 
     const total = inCents + outCents;
     const inPct = total > 0 ? (inCents / total) * 100 : 0;
-    document.getElementById("pie-chart").style.background =
-      total > 0 ? `conic-gradient(var(--green) 0% ${inPct}%, var(--red) ${inPct}% 100%)` : "var(--border)";
+    const hasActivity = total > 0;
+    document.getElementById("pie-chart-svg").style.display = hasActivity ? "" : "none";
+    document.getElementById("pie-legend").style.display = hasActivity ? "" : "none";
+    document.getElementById("pie-empty").style.display = hasActivity ? "none" : "";
+    if (hasActivity) {
+      document.getElementById("pie-chart-fg").setAttribute("d", pieSlicePath(inPct));
+    }
     document.getElementById("pie-in").textContent = formatUSD(inCents);
     document.getElementById("pie-out").textContent = formatUSD(outCents);
   });

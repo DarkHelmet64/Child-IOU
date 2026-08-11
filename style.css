@@ -192,12 +192,15 @@ button:disabled { opacity: 0.5; cursor: default; }
   gap: 20px;
 }
 
-.pie-chart {
+.pie-chart-svg {
   flex-shrink: 0;
   width: 96px;
   height: 96px;
-  border-radius: 50%;
-  background: var(--border);
+}
+
+.pie-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .pie-legend {
