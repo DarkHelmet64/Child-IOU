@@ -1,25 +1,28 @@
 # Family Bank
 
-A free, pretend "bank account" tracker for kids. Each child gets their own QR
-code / link that opens a page showing their balance and transaction history.
-A parent can add or subtract money (behind a PIN); the balance updates live
-on every device, since it's backed by a small free cloud database — nothing
-connects to a real bank.
+A free, pretend "bank account" tracker for kids. One QR code / link opens
+the app, which shows every child's balance and transaction history, plus a
+simple pie chart of money in vs. money out for each one. The balance updates
+live on every device, since it's backed by a small free cloud database —
+nothing connects to a real bank.
 
 No build step, no framework — plain HTML/CSS/JS, hosted for free on GitHub
 Pages, data stored for free in Firebase Firestore.
 
 ## How it works
 
-- **Admin screen** (the site's root URL, no `?account=` in it): create, view,
-  and delete child accounts.
-- **Account screen** (`?account=<id>`): shows one child's balance and recent
-  transactions, with "Add money" / "Subtract money" buttons. This is the page
-  the QR code links to.
-- **PIN**: the first time anyone adds/subtracts money or creates/deletes an
-  account, the app asks you to set a PIN. From then on, that PIN is required
-  for those actions. See the security note below — it's a soft deterrent for
-  kids, not real security.
+- **Admin screen** (the site's root URL, no `?account=` in it): view all
+  accounts and their balances, and a "+ Create account" button.
+- **New account screen** (`?new`): a small form for a child's name and an
+  optional starting balance.
+- **Account screen** (`?account=<id>`): shows one child's balance, a pie
+  chart of money in vs. out, and recent transactions, with "Add money" /
+  "Subtract money" buttons and a "Delete account" button.
+- **PIN**: adding money, creating an account, or deleting an account asks
+  for a PIN (the first time, the app has you set one). Subtracting money
+  does **not** require the PIN, so kids can freely log what they spent —
+  only adding money (or removing an account) needs a parent. See the
+  security note below — this PIN is a soft deterrent, not real security.
 
 ## One-time setup
 
@@ -55,22 +58,25 @@ Pages, data stored for free in Firebase Firestore.
 3. Save. GitHub will give you a URL like
    `https://<your-username>.github.io/<repo-name>/` — that's your app.
 
-### 4. Create accounts and get QR codes
+### 4. Create accounts and get a QR code
 
 1. Open your GitHub Pages URL. You'll land on the admin screen.
-2. Create an account for each child (name + optional starting balance).
-3. Tap into an account and hit **Show QR code**. Scan it with your child's
-   device (or your own) to open that child's balance page directly, or use
-   **Copy link** to send/save it another way. Save the QR image (screenshot,
-   or print it) so it's easy to scan again later.
+2. Tap **+ Create account** and fill in a name (and an optional starting
+   balance) for each child. You're dropped straight into that child's account
+   page once it's created.
+3. From the admin screen, tap **Show QR code** to get one QR code / link for
+   the whole app (not one per child) — print it, download it as a PNG, or
+   copy the link. Scanning it opens the admin screen, where anyone can tap
+   into a child's account.
 
 ## Adding / subtracting money
 
-Open a child's account page, tap **Add money** or **Subtract money**, enter
-an amount and an optional note (e.g. "Allowance", "Bought a toy"), and enter
-the PIN when asked. The balance and history update immediately, and any other
-device with that child's page open (or that scans the QR again) will see the
-new balance too.
+Open a child's account page and tap **Add money** or **Subtract money**,
+then enter an amount and an optional note (e.g. "Allowance", "Bought a
+toy"). Adding money asks for the PIN; subtracting doesn't, so a kid can
+freely log what they spent without needing a parent. The balance, pie
+chart, and history update immediately, and any other device with that
+child's page open will see the change too.
 
 ## Security note
 

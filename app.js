@@ -24,9 +24,12 @@ const $app = document.getElementById("app");
 
 const params = new URLSearchParams(location.search);
 const accountId = params.get("account");
+const isNewAccountPage = params.has("new");
 
 if (isConfigMissing()) {
   renderConfigMissing();
+} else if (isNewAccountPage) {
+  renderNewAccountView();
 } else if (accountId) {
   renderAccountView(accountId);
 } else {
@@ -77,12 +80,6 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
-}
-
-function accountUrl(id) {
-  const url = new URL(location.href);
-  url.search = `?account=${id}`;
-  return url.toString();
 }
 
 function siteUrl() {
@@ -269,14 +266,7 @@ function renderAdminView() {
       <button class="secondary small" id="site-qr-btn">Show QR code</button>
     </div>
     <div id="account-list"></div>
-    <div class="card">
-      <div class="section-title" style="margin-top:0">New account</div>
-      <form id="new-account-form" class="new-account-form">
-        <input id="new-account-name" type="text" placeholder="Child's name" required />
-        <input id="new-account-balance" type="number" step="0.01" min="0" placeholder="Starting balance (optional, e.g. 20.00)" />
-        <button type="submit">Create account</button>
-      </form>
-    </div>
+    <a class="btn primary-action" href="?new">+ Create account</a>
   `;
 
   document.getElementById("site-qr-btn").addEventListener("click", () => {
@@ -286,7 +276,7 @@ function renderAdminView() {
   const listEl = document.getElementById("account-list");
   onSnapshot(collection(db, "accounts"), (snap) => {
     if (snap.empty) {
-      listEl.innerHTML = `<p class="empty">No accounts yet. Create one below to get started.</p>`;
+      listEl.innerHTML = `<p class="empty">No accounts yet. Create one to get started.</p>`;
       return;
     }
     const rows = [];
@@ -307,6 +297,24 @@ function renderAdminView() {
       });
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// New account view: a dedicated page for creating a child's account
+// ---------------------------------------------------------------------------
+
+function renderNewAccountView() {
+  $app.innerHTML = `
+    <a class="back-link" href="./">&larr; All accounts</a>
+    <h1><span class="emoji">🏦</span>New account</h1>
+    <div class="card">
+      <form id="new-account-form" class="new-account-form">
+        <input id="new-account-name" type="text" placeholder="Child's name" required autofocus />
+        <input id="new-account-balance" type="number" step="0.01" min="0" placeholder="Starting balance (optional, e.g. 20.00)" />
+        <button type="submit">Create account</button>
+      </form>
+    </div>
+  `;
 
   document.getElementById("new-account-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -325,6 +333,8 @@ function renderAdminView() {
     const accountRef = await addDoc(collection(db, "accounts"), {
       name,
       balanceCents: startingCents,
+      totalInCents: startingCents > 0 ? startingCents : 0,
+      totalOutCents: 0,
       createdAt: serverTimestamp(),
     });
 
@@ -336,8 +346,7 @@ function renderAdminView() {
       });
     }
 
-    e.target.reset();
-    showToast(`Created account for ${name}`);
+    location.search = `?account=${accountRef.id}`;
   });
 }
 
@@ -370,6 +379,8 @@ function renderAccountView(id) {
 function renderAccountBody(id, data) {
   // Only rebuild the shell once; called on every balance update, so keep it idempotent.
   const negative = data.balanceCents < 0 ? "negative" : "";
+  const inCents = data.totalInCents || 0;
+  const outCents = data.totalOutCents || 0;
 
   if (!document.getElementById("hero-amount")) {
     $app.innerHTML = `
@@ -382,8 +393,17 @@ function renderAccountBody(id, data) {
         <button class="add-btn" id="add-btn">+ Add money</button>
         <button class="subtract-btn" id="subtract-btn">&minus; Subtract</button>
       </div>
-      <div class="action-row">
-        <button class="secondary" id="copy-link-btn">Copy link</button>
+      <div class="card pie-card">
+        <div class="section-title" style="margin-top:0">Money in vs. money out</div>
+        <div class="pie-row">
+          <div class="pie-chart" id="pie-chart"></div>
+          <div class="pie-legend">
+            <div class="pie-legend-item"><span class="dot in"></span>In <strong id="pie-in"></strong></div>
+            <div class="pie-legend-item"><span class="dot out"></span>Out <strong id="pie-out"></strong></div>
+          </div>
+        </div>
+      </div>
+      <div class="single-action">
         <button class="ghost" id="delete-btn">Delete account</button>
       </div>
       <div class="section-title">Recent activity</div>
@@ -392,10 +412,6 @@ function renderAccountBody(id, data) {
 
     document.getElementById("add-btn").addEventListener("click", () => openTxModal(id, 1));
     document.getElementById("subtract-btn").addEventListener("click", () => openTxModal(id, -1));
-    document.getElementById("copy-link-btn").addEventListener("click", async () => {
-      await copyToClipboard(accountUrl(id));
-      showToast("Link copied");
-    });
     document.getElementById("delete-btn").addEventListener("click", () => deleteAccount(id, data.name));
 
     listenTransactions(id);
@@ -405,6 +421,13 @@ function renderAccountBody(id, data) {
   const amountEl = document.getElementById("hero-amount");
   amountEl.textContent = formatUSD(data.balanceCents);
   amountEl.className = `amount ${negative}`;
+
+  const total = inCents + outCents;
+  const inPct = total > 0 ? (inCents / total) * 100 : 0;
+  document.getElementById("pie-chart").style.background =
+    total > 0 ? `conic-gradient(var(--green) 0% ${inPct}%, var(--red) ${inPct}% 100%)` : "var(--border)";
+  document.getElementById("pie-in").textContent = formatUSD(inCents);
+  document.getElementById("pie-out").textContent = formatUSD(outCents);
 }
 
 function listenTransactions(id) {
@@ -483,12 +506,19 @@ function openTxModal(accountId, sign) {
     const note = overlay.querySelector("#tx-note").value.trim();
 
     overlay.remove();
-    const ok = await requirePin(isAdd ? "add money" : "subtract money");
-    if (!ok) return;
+    // Adding money is PIN-protected (so a kid can't just give themselves money);
+    // subtracting isn't, so kids can freely log what they spent.
+    if (isAdd) {
+      const ok = await requirePin("add money");
+      if (!ok) return;
+    }
 
     const signedCents = cents * sign;
     const batch = writeBatch(db);
-    batch.update(doc(db, "accounts", accountId), { balanceCents: increment(signedCents) });
+    batch.update(doc(db, "accounts", accountId), {
+      balanceCents: increment(signedCents),
+      [isAdd ? "totalInCents" : "totalOutCents"]: increment(Math.abs(signedCents)),
+    });
     batch.set(doc(collection(db, "accounts", accountId, "transactions")), {
       amountCents: signedCents,
       note: note || (isAdd ? "Deposit" : "Withdrawal"),
