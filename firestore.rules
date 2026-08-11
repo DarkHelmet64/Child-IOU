@@ -1,0 +1,36 @@
+rules_version = '2';
+
+// Security model for this app:
+// - This is a static, serverless site (no backend), so these rules are the only real
+//   access control. They are intentionally permissive: anyone who has a link to this
+//   site can read balances, and anyone can write (create accounts, post transactions).
+// - The in-app PIN prompt is a soft, UI-level deterrent to stop a kid from casually
+//   editing their own balance. It is NOT enforced by these rules and is not real
+//   security -- treat this app like an unlisted shared document. Do not use it for
+//   anything beyond a fun, low-stakes "pretend bank account" with your own kids, and
+//   don't share the link/QR codes outside your family.
+// - Basic shape validation below just guards against accidentally malformed data.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /accounts/{accountId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['name', 'balanceCents'])
+                             && request.resource.data.name is string
+                             && request.resource.data.balanceCents is int;
+      allow delete: if true;
+
+      match /transactions/{transactionId} {
+        allow read: if true;
+        allow create: if request.resource.data.keys().hasAll(['amountCents', 'note'])
+                       && request.resource.data.amountCents is int;
+        allow update, delete: if false;
+      }
+    }
+
+    match /settings/config {
+      allow read, write: if true;
+    }
+  }
+}
