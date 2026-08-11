@@ -534,16 +534,27 @@ function openTxModal(accountId, sign) {
 // ---------------------------------------------------------------------------
 
 function openQrModal(url, title) {
-  const hasQr = !!window.QRCode;
+  const hasCanvasQr = !!window.QRCode;
+  // If the QR-generating script never loaded (e.g. blocked by network/device
+  // filtering), fall back to a plain <img> from a public QR-image API. Images
+  // are sometimes allowed through filters that block third-party <script>
+  // domains. If that fails too, its onerror handler below drops to text-only.
+  const fallbackImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(url)}`;
+
   const overlay = buildModal(`
     <div class="qr-wrap">
       <h2>${escapeHtml(title)}</h2>
-      ${hasQr ? `<canvas id="qr-canvas"></canvas>` : `<p class="hint">The QR code image couldn't load, but you can still copy or print the link below.</p>`}
+      ${
+        hasCanvasQr
+          ? `<canvas id="qr-canvas"></canvas>`
+          : `<img id="qr-fallback-img" width="240" height="240" alt="QR code" src="${fallbackImgUrl}" />
+             <p class="hint" id="qr-fallback-hint" style="display:none">The QR code image couldn't load, but you can still copy or print the link below.</p>`
+      }
       <div class="qr-link">${escapeHtml(url)}</div>
       <div class="qr-actions no-print">
         <button class="secondary small" id="copy-link-btn">Copy link</button>
         <button class="secondary small" id="print-btn">Print</button>
-        ${hasQr ? `<button class="secondary small" id="download-btn">Download PNG</button>` : ""}
+        ${hasCanvasQr ? `<button class="secondary small" id="download-btn">Download PNG</button>` : ""}
       </div>
     </div>
     <div class="modal-actions no-print">
@@ -552,7 +563,8 @@ function openQrModal(url, title) {
   `);
 
   let canvas = null;
-  if (hasQr) {
+  let fallbackImgSrc = null;
+  if (hasCanvasQr) {
     canvas = overlay.querySelector("#qr-canvas");
     window.QRCode.toCanvas(canvas, url, { width: 240, margin: 2 }, (err) => {
       if (err) console.error(err);
@@ -563,6 +575,14 @@ function openQrModal(url, title) {
       link.href = canvas.toDataURL("image/png");
       link.click();
     });
+  } else {
+    fallbackImgSrc = fallbackImgUrl;
+    const fallbackImgEl = overlay.querySelector("#qr-fallback-img");
+    fallbackImgEl.addEventListener("error", () => {
+      fallbackImgEl.style.display = "none";
+      overlay.querySelector("#qr-fallback-hint").style.display = "block";
+      fallbackImgSrc = null;
+    });
   }
 
   overlay.querySelector("#copy-link-btn").addEventListener("click", async () => {
@@ -570,7 +590,7 @@ function openQrModal(url, title) {
     showToast("Link copied");
   });
   overlay.querySelector("#print-btn").addEventListener("click", () => {
-    openPrintableWindow(title, url, canvas);
+    openPrintableWindow(title, url, canvas, fallbackImgSrc);
   });
   overlay.querySelector("#modal-close").addEventListener("click", () => overlay.remove());
 }
@@ -578,7 +598,7 @@ function openQrModal(url, title) {
 // Prints from a dedicated, minimal page in a new tab rather than the app itself.
 // This is far more reliable across browsers than calling window.print() on the
 // live app page, and still works even when the QR image itself failed to load.
-function openPrintableWindow(title, url, canvas) {
+function openPrintableWindow(title, url, canvas, fallbackImgSrc) {
   const printWindow = window.open("", "_blank");
   if (!printWindow) {
     // Pop-up blocked -- fall back to printing the current page (styled by the
@@ -587,7 +607,8 @@ function openPrintableWindow(title, url, canvas) {
     return;
   }
 
-  const imgTag = canvas ? `<img src="${canvas.toDataURL("image/png")}" alt="QR code" />` : "";
+  const imgSrc = canvas ? canvas.toDataURL("image/png") : fallbackImgSrc;
+  const imgTag = imgSrc ? `<img src="${imgSrc}" alt="QR code" />` : "";
   printWindow.document.write(`
     <!doctype html>
     <html>
