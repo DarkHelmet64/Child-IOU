@@ -110,6 +110,12 @@ button.danger {
   border: 1px solid var(--red);
 }
 
+button.danger-solid {
+  background: var(--red);
+  color: white;
+}
+button.danger-solid:active { background: #ad2c2f; }
+
 button.small { padding: 6px 10px; font-size: 0.85rem; }
 
 button:disabled { opacity: 0.5; cursor: default; }

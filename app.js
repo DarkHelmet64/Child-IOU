@@ -85,12 +85,126 @@ function accountUrl(id) {
   return url.toString();
 }
 
+function siteUrl() {
+  const url = new URL(location.href);
+  url.search = "";
+  return url.toString();
+}
+
 function showToast(message) {
   const toast = document.createElement("div");
   toast.className = "toast";
   toast.textContent = message;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 2200);
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    // Clipboard API unavailable (older browsers, some webviews) — fall back below.
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+// ---------------------------------------------------------------------------
+// Modal helpers
+//
+// We use our own in-page modals everywhere instead of window.prompt/alert/confirm.
+// Those native dialogs are silently disabled by iOS Safari once a page is opened
+// from a home-screen icon (exactly how this app is meant to be used after
+// scanning a QR code), so relying on them made PIN entry randomly stop working.
+// ---------------------------------------------------------------------------
+
+function buildModal(innerHtml, { onDismiss } = {}) {
+  const overlay = document.createElement("div");
+  overlay.className = "overlay";
+  overlay.innerHTML = `<div class="modal">${innerHtml}</div>`;
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) {
+      overlay.remove();
+      if (onDismiss) onDismiss();
+    }
+  });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function openPromptModal({ title, message, inputType = "text", placeholder = "", confirmLabel = "OK" }) {
+  return new Promise((resolve) => {
+    const overlay = buildModal(
+      `
+        <h2>${escapeHtml(title)}</h2>
+        ${message ? `<p class="hint">${escapeHtml(message)}</p>` : ""}
+        <input id="prompt-input" type="${inputType}" placeholder="${escapeHtml(placeholder)}" autocomplete="off" autofocus />
+        <div class="modal-actions">
+          <button class="secondary" id="prompt-cancel">Cancel</button>
+          <button id="prompt-submit">${escapeHtml(confirmLabel)}</button>
+        </div>
+      `,
+      { onDismiss: () => resolve(null) }
+    );
+    const input = overlay.querySelector("#prompt-input");
+    const finish = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.querySelector("#prompt-cancel").addEventListener("click", () => finish(null));
+    overlay.querySelector("#prompt-submit").addEventListener("click", () => finish(input.value));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") finish(input.value);
+    });
+    input.focus();
+  });
+}
+
+function openConfirmModal({ title, message, confirmLabel = "Confirm", danger = false }) {
+  return new Promise((resolve) => {
+    const overlay = buildModal(
+      `
+        <h2>${escapeHtml(title)}</h2>
+        ${message ? `<p class="hint">${escapeHtml(message)}</p>` : ""}
+        <div class="modal-actions">
+          <button class="secondary" id="confirm-cancel">Cancel</button>
+          <button class="${danger ? "danger-solid" : ""}" id="confirm-ok">${escapeHtml(confirmLabel)}</button>
+        </div>
+      `,
+      { onDismiss: () => resolve(false) }
+    );
+    const finish = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.querySelector("#confirm-cancel").addEventListener("click", () => finish(false));
+    overlay.querySelector("#confirm-ok").addEventListener("click", () => finish(true));
+  });
+}
+
+function openAlertModal(message) {
+  return new Promise((resolve) => {
+    const overlay = buildModal(
+      `
+        <p>${escapeHtml(message)}</p>
+        <div class="modal-actions">
+          <button id="alert-ok">OK</button>
+        </div>
+      `,
+      { onDismiss: () => resolve() }
+    );
+    overlay.querySelector("#alert-ok").addEventListener("click", () => {
+      overlay.remove();
+      resolve();
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -106,23 +220,39 @@ async function requirePin(actionLabel) {
   const storedPin = await getStoredPin();
 
   if (!storedPin) {
-    const newPin = prompt(
-      `No PIN is set up yet. Choose a PIN to protect edits like "${actionLabel}":`
-    );
+    const newPin = await openPromptModal({
+      title: "Set up a PIN",
+      message: `No PIN is set up yet. Choose one to protect edits like "${actionLabel}".`,
+      inputType: "password",
+      placeholder: "New PIN",
+      confirmLabel: "Set PIN",
+    });
     if (!newPin) return false;
-    const confirmPin = prompt("Enter the same PIN again to confirm:");
+    const confirmPin = await openPromptModal({
+      title: "Confirm PIN",
+      message: "Enter the same PIN again to confirm.",
+      inputType: "password",
+      placeholder: "Confirm PIN",
+      confirmLabel: "Confirm",
+    });
     if (newPin !== confirmPin) {
-      alert("Those PINs didn't match. Please try again.");
+      await openAlertModal("Those PINs didn't match. Please try again.");
       return false;
     }
     await setDoc(doc(db, "settings", "config"), { pin: newPin });
     return true;
   }
 
-  const entered = prompt(`Enter PIN to ${actionLabel}:`);
+  const entered = await openPromptModal({
+    title: "Enter PIN",
+    message: `Enter the PIN to ${actionLabel}.`,
+    inputType: "password",
+    placeholder: "PIN",
+    confirmLabel: "Submit",
+  });
   if (entered === null) return false;
   if (entered !== storedPin) {
-    alert("Incorrect PIN.");
+    await openAlertModal("Incorrect PIN.");
     return false;
   }
   return true;
@@ -134,7 +264,10 @@ async function requirePin(actionLabel) {
 
 function renderAdminView() {
   $app.innerHTML = `
-    <h1><span class="emoji">🏦</span>Family Bank</h1>
+    <div class="top-bar">
+      <h1><span class="emoji">🏦</span>Family Bank</h1>
+      <button class="secondary small" id="site-qr-btn">Show QR code</button>
+    </div>
     <div id="account-list"></div>
     <div class="card">
       <div class="section-title" style="margin-top:0">New account</div>
@@ -145,6 +278,10 @@ function renderAdminView() {
       </form>
     </div>
   `;
+
+  document.getElementById("site-qr-btn").addEventListener("click", () => {
+    openQrModal(siteUrl(), "Scan to open Family Bank");
+  });
 
   const listEl = document.getElementById("account-list");
   onSnapshot(collection(db, "accounts"), (snap) => {
@@ -178,7 +315,7 @@ function renderAdminView() {
     const balanceInput = document.getElementById("new-account-balance").value;
     const startingCents = balanceInput ? dollarsToCents(balanceInput) : 0;
     if (Number.isNaN(startingCents)) {
-      alert("Please enter a valid starting balance.");
+      await openAlertModal("Please enter a valid starting balance.");
       return;
     }
 
@@ -246,7 +383,7 @@ function renderAccountBody(id, data) {
         <button class="subtract-btn" id="subtract-btn">&minus; Subtract</button>
       </div>
       <div class="action-row">
-        <button class="secondary" id="qr-btn">Show QR code</button>
+        <button class="secondary" id="copy-link-btn">Copy link</button>
         <button class="ghost" id="delete-btn">Delete account</button>
       </div>
       <div class="section-title">Recent activity</div>
@@ -255,7 +392,10 @@ function renderAccountBody(id, data) {
 
     document.getElementById("add-btn").addEventListener("click", () => openTxModal(id, 1));
     document.getElementById("subtract-btn").addEventListener("click", () => openTxModal(id, -1));
-    document.getElementById("qr-btn").addEventListener("click", () => openQrModal(id, data.name));
+    document.getElementById("copy-link-btn").addEventListener("click", async () => {
+      await copyToClipboard(accountUrl(id));
+      showToast("Link copied");
+    });
     document.getElementById("delete-btn").addEventListener("click", () => deleteAccount(id, data.name));
 
     listenTransactions(id);
@@ -301,7 +441,13 @@ function listenTransactions(id) {
 }
 
 async function deleteAccount(id, name) {
-  if (!confirm(`Delete ${name}'s account? This cannot be undone.`)) return;
+  const confirmed = await openConfirmModal({
+    title: "Delete account?",
+    message: `Delete ${name}'s account? This cannot be undone.`,
+    confirmLabel: "Delete",
+    danger: true,
+  });
+  if (!confirmed) return;
   const ok = await requirePin(`delete ${name}'s account`);
   if (!ok) return;
   await deleteDoc(doc(db, "accounts", id));
@@ -331,7 +477,7 @@ function openTxModal(accountId, sign) {
     const amountStr = overlay.querySelector("#tx-amount").value;
     const cents = dollarsToCents(amountStr);
     if (!cents || Number.isNaN(cents) || cents <= 0) {
-      alert("Please enter a valid amount greater than $0.");
+      await openAlertModal("Please enter a valid amount greater than $0.");
       return;
     }
     const note = overlay.querySelector("#tx-note").value.trim();
@@ -354,13 +500,12 @@ function openTxModal(accountId, sign) {
 }
 
 // ---------------------------------------------------------------------------
-// QR code modal
+// QR code modal (used for the site's own home-screen QR code)
 // ---------------------------------------------------------------------------
 
-function openQrModal(accountId, name) {
-  const url = accountUrl(accountId);
+function openQrModal(url, title) {
   const overlay = buildModal(`
-    <h2>${escapeHtml(name)}'s QR code</h2>
+    <h2>${escapeHtml(title)}</h2>
     <div class="qr-wrap">
       <canvas id="qr-canvas"></canvas>
       <div class="qr-link">${escapeHtml(url)}</div>
@@ -376,26 +521,13 @@ function openQrModal(accountId, name) {
     window.QRCode.toCanvas(canvas, url, { width: 220, margin: 1 }, (err) => {
       if (err) console.error(err);
     });
+  } else {
+    canvas.remove();
   }
 
   overlay.querySelector("#copy-link-btn").addEventListener("click", async () => {
-    await navigator.clipboard.writeText(url);
+    await copyToClipboard(url);
     showToast("Link copied");
   });
   overlay.querySelector("#modal-close").addEventListener("click", () => overlay.remove());
-}
-
-// ---------------------------------------------------------------------------
-// Modal helper
-// ---------------------------------------------------------------------------
-
-function buildModal(innerHtml) {
-  const overlay = document.createElement("div");
-  overlay.className = "overlay";
-  overlay.innerHTML = `<div class="modal">${innerHtml}</div>`;
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) overlay.remove();
-  });
-  document.body.appendChild(overlay);
-  return overlay;
 }
