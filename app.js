@@ -629,6 +629,18 @@ function lowerFirst(str) {
   return str.charAt(0).toLowerCase() + str.slice(1);
 }
 
+// Without this, a rejected read leaves the chore list sitting on "Loading…"
+// forever with the reason buried in the browser console. The overwhelmingly
+// likely cause is the `chores` rules block not being published yet, so say so.
+function choreLoadErrorHtml(err) {
+  console.error(err);
+  const message =
+    err && err.code === "permission-denied"
+      ? "The database is refusing to load chores. Publish the updated firestore.rules in the Firebase console (Firestore Database → Rules), then reload."
+      : "Couldn't load chores. Check your connection and reload.";
+  return `<p class="empty chore-empty">${message}</p>`;
+}
+
 // A stable id for "the stretch of time this claim belongs to", in local time.
 function currentPeriodKey(resetPeriod, now = new Date()) {
   const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -740,11 +752,17 @@ function mountChoreList(containerEl, { accountId = null, accountName = null } = 
     else if (button.dataset.act === "unclaim") unclaimChore(chore);
   });
 
-  onSnapshot(query(collection(db, "chores"), orderBy("createdAt")), (snap) => {
-    chores = [];
-    snap.forEach((docSnap) => chores.push({ id: docSnap.id, ...docSnap.data() }));
-    render();
-  });
+  onSnapshot(
+    query(collection(db, "chores"), orderBy("createdAt")),
+    (snap) => {
+      chores = [];
+      snap.forEach((docSnap) => chores.push({ id: docSnap.id, ...docSnap.data() }));
+      render();
+    },
+    (err) => {
+      containerEl.innerHTML = choreLoadErrorHtml(err);
+    }
+  );
 
   // Nothing writes to the database when a chore resets, so a page left open
   // overnight would keep showing yesterday's list. Re-render when the day flips.
@@ -927,34 +945,40 @@ function renderManageChoresView() {
   const listEl = document.getElementById("manage-chore-list");
   let chores = [];
 
-  onSnapshot(query(collection(db, "chores"), orderBy("createdAt")), (snap) => {
-    chores = [];
-    snap.forEach((docSnap) => chores.push({ id: docSnap.id, ...docSnap.data() }));
-    if (!chores.length) {
-      listEl.innerHTML = `<p class="empty">No chores yet.</p>`;
-      return;
+  onSnapshot(
+    query(collection(db, "chores"), orderBy("createdAt")),
+    (snap) => {
+      chores = [];
+      snap.forEach((docSnap) => chores.push({ id: docSnap.id, ...docSnap.data() }));
+      if (!chores.length) {
+        listEl.innerHTML = `<p class="empty">No chores yet.</p>`;
+        return;
+      }
+      listEl.innerHTML = chores
+        .map((chore) => {
+          const claim = activeClaim(chore);
+          const status = !claim
+            ? RESET_PERIODS[resetPeriodOf(chore)].label
+            : `${RESET_PERIODS[resetPeriodOf(chore)].label} · ${claim.approved ? "done by" : "claimed by"} ${escapeHtml(claim.accountName)}`;
+          return `
+            <div class="chore-row" data-id="${chore.id}">
+              <span class="chore-info">
+                <span class="chore-name">${escapeHtml(chore.name)}</span>
+                <span class="chore-meta">${status}</span>
+              </span>
+              <span class="chore-amount">${formatUSD(chore.amountCents)}</span>
+              <span class="chore-actions">
+                <button class="ghost" data-act="delete">Delete</button>
+              </span>
+            </div>
+          `;
+        })
+        .join("");
+    },
+    (err) => {
+      listEl.innerHTML = choreLoadErrorHtml(err);
     }
-    listEl.innerHTML = chores
-      .map((chore) => {
-        const claim = activeClaim(chore);
-        const status = !claim
-          ? RESET_PERIODS[resetPeriodOf(chore)].label
-          : `${RESET_PERIODS[resetPeriodOf(chore)].label} · ${claim.approved ? "done by" : "claimed by"} ${escapeHtml(claim.accountName)}`;
-        return `
-          <div class="chore-row" data-id="${chore.id}">
-            <span class="chore-info">
-              <span class="chore-name">${escapeHtml(chore.name)}</span>
-              <span class="chore-meta">${status}</span>
-            </span>
-            <span class="chore-amount">${formatUSD(chore.amountCents)}</span>
-            <span class="chore-actions">
-              <button class="ghost" data-act="delete">Delete</button>
-            </span>
-          </div>
-        `;
-      })
-      .join("");
-  });
+  );
 
   listEl.addEventListener("click", async (e) => {
     const button = e.target.closest("button[data-act='delete']");
