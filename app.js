@@ -267,25 +267,22 @@ async function requirePin(actionLabel) {
 // ---------------------------------------------------------------------------
 
 function renderAdminView() {
+  // Claimed chores render above everything else: they're the one thing on this
+  // screen waiting on a grown-up, so they shouldn't be scrolled past.
   $app.innerHTML = `
-    <div class="top-bar">
-      <h1><span class="emoji">🏦</span>Family Bank</h1>
-      <button class="secondary small" id="site-qr-btn">Show QR code</button>
-    </div>
+    <h1><span class="emoji">🏦</span>Family Bank</h1>
+    <div class="chore-pending-top" id="chore-pending"></div>
     <div id="account-list"></div>
-    <a class="btn primary-action" href="?new">+ Create account</a>
-    <div class="section-title row-title">
-      <span>Chores</span>
-      <a class="inline-link" href="?chores">Manage</a>
-    </div>
+    <div class="section-title">Chores</div>
     <div class="chore-list" id="chore-list"><p class="loading">Loading…</p></div>
+    <button class="secondary full-action" id="more-btn">More</button>
   `;
 
-  document.getElementById("site-qr-btn").addEventListener("click", () => {
-    openQrModal(siteUrl(), "Scan to open Family Bank");
-  });
+  document.getElementById("more-btn").addEventListener("click", openMoreMenu);
 
-  mountChoreList(document.getElementById("chore-list"));
+  mountChoreList(document.getElementById("chore-list"), {
+    pendingEl: document.getElementById("chore-pending"),
+  });
 
   const listEl = document.getElementById("account-list");
   onSnapshot(collection(db, "accounts"), (snap) => {
@@ -309,6 +306,34 @@ function renderAdminView() {
       row.addEventListener("click", () => {
         location.search = `?account=${row.dataset.id}`;
       });
+    });
+  });
+}
+
+// The three housekeeping actions (QR code, new account, chore admin) live
+// behind one button at the bottom, so the dashboard itself stays about the
+// two things you actually open it for: balances and chores.
+function openMoreMenu() {
+  const overlay = buildModal(`
+    <h2>More</h2>
+    <div class="picker-list">
+      <button class="secondary picker-option" data-act="qr">Show QR code</button>
+      <button class="secondary picker-option" data-act="new">+ Create account</button>
+      <button class="secondary picker-option" data-act="chores">Manage chores</button>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="more-cancel">Cancel</button>
+    </div>
+  `);
+
+  const close = () => overlay.remove();
+  overlay.querySelector("#more-cancel").addEventListener("click", close);
+  overlay.querySelectorAll(".picker-option").forEach((button) => {
+    button.addEventListener("click", () => {
+      close();
+      if (button.dataset.act === "qr") openQrModal(siteUrl(), "Scan to open Family Bank");
+      else if (button.dataset.act === "new") location.search = "?new";
+      else location.search = "?chores";
     });
   });
 }
@@ -710,12 +735,14 @@ function choreRowHtml(chore, claim) {
 // Renders the chore list into `containerEl` and keeps it live. On an account
 // page (`accountId` given) claiming is one tap and other kids' claims are
 // hidden; on the dashboard, claiming asks who's claiming.
-function mountChoreList(containerEl, { accountId = null, accountName = null } = {}) {
+function mountChoreList(containerEl, { accountId = null, accountName = null, pendingEl = null } = {}) {
   let chores = [];
 
   const render = () => {
+    if (pendingEl) pendingEl.innerHTML = "";
+
     if (!chores.length) {
-      containerEl.innerHTML = `<p class="empty chore-empty">No chores yet. Tap “Manage” to add one.</p>`;
+      containerEl.innerHTML = `<p class="empty chore-empty">No chores yet. Tap “More” to add one.</p>`;
       return;
     }
 
@@ -734,14 +761,19 @@ function mountChoreList(containerEl, { accountId = null, accountName = null } = 
             .join("")}`
         : "";
 
+    // With a `pendingEl`, claimed chores are lifted out of the list entirely and
+    // rendered there instead (the dashboard puts it above everything else);
+    // without one they stay in place, between the other two groups.
+    if (pendingEl) pendingEl.innerHTML = section("Waiting to be checked", groups.pending);
+
     containerEl.innerHTML =
       section("Up for grabs", groups.available) +
-      section("Waiting to be checked", groups.pending) +
+      (pendingEl ? "" : section("Waiting to be checked", groups.pending)) +
       section("Done for now", groups.done) ||
       `<p class="empty chore-empty">Nothing to claim right now.</p>`;
   };
 
-  containerEl.addEventListener("click", (e) => {
+  const onClick = (e) => {
     const button = e.target.closest("button[data-act]");
     if (!button) return;
     const id = button.closest(".chore-row").dataset.id;
@@ -750,7 +782,9 @@ function mountChoreList(containerEl, { accountId = null, accountName = null } = 
     if (button.dataset.act === "claim") claimChore(chore, accountId, accountName);
     else if (button.dataset.act === "approve") approveChore(chore);
     else if (button.dataset.act === "unclaim") unclaimChore(chore);
-  });
+  };
+  containerEl.addEventListener("click", onClick);
+  if (pendingEl) pendingEl.addEventListener("click", onClick);
 
   onSnapshot(
     query(collection(db, "chores"), orderBy("createdAt")),
@@ -760,6 +794,7 @@ function mountChoreList(containerEl, { accountId = null, accountName = null } = 
       render();
     },
     (err) => {
+      if (pendingEl) pendingEl.innerHTML = "";
       containerEl.innerHTML = choreLoadErrorHtml(err);
     }
   );
