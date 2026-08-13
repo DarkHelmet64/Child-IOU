@@ -13,9 +13,11 @@ Pages, data stored for free in Firebase Firestore.
 
 ## How it works
 
-- **Admin screen** (the site's root URL, no `?account=` in it): view all
-  accounts and their balances, a "+ Create account" button, and the chore
-  list for today.
+- **Admin screen** (the site's root URL, no `?account=` in it): chores
+  waiting to be checked off at the very top, then every account and its
+  balance, then the chore list for today. A single **More** button at the
+  bottom holds the housekeeping actions: show the QR code, create an
+  account, and manage chores.
 - **New account screen** (`?new`): a small form for a child's name and an
   optional starting balance.
 - **Account screen** (`?account=<id>`): shows one child's balance, a pie
@@ -68,10 +70,10 @@ Pages, data stored for free in Firebase Firestore.
 ### 4. Create accounts and get a QR code
 
 1. Open your GitHub Pages URL. You'll land on the admin screen.
-2. Tap **+ Create account** and fill in a name (and an optional starting
-   balance) for each child. You're dropped straight into that child's account
-   page once it's created.
-3. From the admin screen, tap **Show QR code** to get one QR code / link for
+2. Tap **More** at the bottom, then **+ Create account**, and fill in a name
+   (and an optional starting balance) for each child. You're dropped straight
+   into that child's account page once it's created.
+3. From the admin screen, tap **More > Show QR code** to get one QR code / link for
    the whole app (not one per child) — print it, download it as a PNG, or
    copy the link. Scanning it opens the admin screen, where anyone can tap
    into a child's account.
@@ -88,7 +90,7 @@ child's page open will see the change too.
 ## Chores
 
 Chores are shared by the whole family, not attached to one child. From the
-admin screen, tap **Manage** next to "Chores" to add one: a name, what it's
+admin screen, tap **More > Manage chores** to add one: a name, what it's
 worth, and whether it resets **daily**, **weekly** (Sunday), or **monthly**
 (the 1st). Adding or deleting a chore asks for the PIN.
 
@@ -97,8 +99,9 @@ The admin screen then lists what's available right now, in three groups:
 1. **Up for grabs** — tap **Claim** and pick which child is doing it. (From
    a child's own account page it's a single tap, and only that child's
    claims show there.) Claiming needs no PIN.
-2. **Waiting to be checked** — the chore is off the list for everyone else
-   until it resets. A parent taps **Check off** and enters the same PIN used
+2. **Waiting to be checked** — the chore jumps to the very top of the admin
+   screen, above the balances, and is off the list for everyone else until it
+   resets. A parent taps **Check off** and enters the same PIN used
    to add money; that adds the chore's value to that child's balance and
    logs a "Chore: …" transaction. **Unclaim** hands it back with no PIN, in
    case the wrong name was tapped.
