@@ -2,9 +2,11 @@
 
 A free, pretend "bank account" tracker for kids. One QR code / link opens
 the app, which shows every child's balance and transaction history, plus a
-simple pie chart of that month's money in vs. money out for each one. The
-balance updates live on every device, since it's backed by a small free
-cloud database — nothing connects to a real bank.
+simple pie chart of that month's money in vs. money out for each one. It
+also keeps a chore list: kids claim a chore, a parent checks it off with
+the PIN, and the money lands in that child's account. The balance updates
+live on every device, since it's backed by a small free cloud database —
+nothing connects to a real bank.
 
 No build step, no framework — plain HTML/CSS/JS, hosted for free on GitHub
 Pages, data stored for free in Firebase Firestore.
@@ -12,17 +14,22 @@ Pages, data stored for free in Firebase Firestore.
 ## How it works
 
 - **Admin screen** (the site's root URL, no `?account=` in it): view all
-  accounts and their balances, and a "+ Create account" button.
+  accounts and their balances, a "+ Create account" button, and the chore
+  list for today.
 - **New account screen** (`?new`): a small form for a child's name and an
   optional starting balance.
 - **Account screen** (`?account=<id>`): shows one child's balance, a pie
-  chart of money in vs. out, and recent transactions, with "Add money" /
-  "Subtract money" buttons and a "Delete account" button.
-- **PIN**: adding money, creating an account, or deleting an account asks
-  for a PIN (the first time, the app has you set one). Subtracting money
-  does **not** require the PIN, so kids can freely log what they spent —
-  only adding money (or removing an account) needs a parent. See the
-  security note below — this PIN is a soft deterrent, not real security.
+  chart of money in vs. out, the chores that child can claim, and recent
+  transactions, with "Add money" / "Subtract money" buttons and a "Delete
+  account" button.
+- **Chores screen** (`?chores`): add and remove chores.
+- **PIN**: adding money, checking off a chore, adding or deleting a chore,
+  creating an account, or deleting an account asks for a PIN (the first
+  time, the app has you set one). Subtracting money and claiming a chore do
+  **not** require the PIN, so kids can freely log what they spent and call
+  dibs on a chore — only the things that create money (or remove an
+  account) need a parent. See the security note below — this PIN is a soft
+  deterrent, not real security.
 
 ## One-time setup
 
@@ -77,6 +84,31 @@ toy"). Adding money asks for the PIN; subtracting doesn't, so a kid can
 freely log what they spent without needing a parent. The balance, pie
 chart, and history update immediately, and any other device with that
 child's page open will see the change too.
+
+## Chores
+
+Chores are shared by the whole family, not attached to one child. From the
+admin screen, tap **Manage** next to "Chores" to add one: a name, what it's
+worth, and whether it resets **daily**, **weekly** (Sunday), or **monthly**
+(the 1st). Adding or deleting a chore asks for the PIN.
+
+The admin screen then lists what's available right now, in three groups:
+
+1. **Up for grabs** — tap **Claim** and pick which child is doing it. (From
+   a child's own account page it's a single tap, and only that child's
+   claims show there.) Claiming needs no PIN.
+2. **Waiting to be checked** — the chore is off the list for everyone else
+   until it resets. A parent taps **Check off** and enters the same PIN used
+   to add money; that adds the chore's value to that child's balance and
+   logs a "Chore: …" transaction. **Unclaim** hands it back with no PIN, in
+   case the wrong name was tapped.
+3. **Done for now** — checked off and paid, until the chore resets.
+
+Resets aren't a scheduled job — there's no server to run one. Each claim
+records the day, week, or month it belongs to, so a chore simply becomes
+claimable again the moment the calendar rolls past that period (using the
+device's own local time). Deleting a chore doesn't touch money already paid
+out for it.
 
 ## Security note
 

@@ -5,8 +5,10 @@ import {
   doc,
   addDoc,
   setDoc,
+  updateDoc,
   deleteDoc,
   getDoc,
+  getDocs,
   onSnapshot,
   query,
   where,
@@ -15,6 +17,7 @@ import {
   serverTimestamp,
   increment,
   writeBatch,
+  runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -26,11 +29,14 @@ const $app = document.getElementById("app");
 const params = new URLSearchParams(location.search);
 const accountId = params.get("account");
 const isNewAccountPage = params.has("new");
+const isChoresPage = params.has("chores");
 
 if (isConfigMissing()) {
   renderConfigMissing();
 } else if (isNewAccountPage) {
   renderNewAccountView();
+} else if (isChoresPage) {
+  renderManageChoresView();
 } else if (accountId) {
   renderAccountView(accountId);
 } else {
@@ -268,11 +274,18 @@ function renderAdminView() {
     </div>
     <div id="account-list"></div>
     <a class="btn primary-action" href="?new">+ Create account</a>
+    <div class="section-title row-title">
+      <span>Chores</span>
+      <a class="inline-link" href="?chores">Manage</a>
+    </div>
+    <div class="chore-list" id="chore-list"><p class="loading">Loading…</p></div>
   `;
 
   document.getElementById("site-qr-btn").addEventListener("click", () => {
     openQrModal(siteUrl(), "Scan to open Family Bank");
   });
+
+  mountChoreList(document.getElementById("chore-list"));
 
   const listEl = document.getElementById("account-list");
   onSnapshot(collection(db, "accounts"), (snap) => {
@@ -404,6 +417,11 @@ function renderAccountBody(id, data) {
           </div>
         </div>
       </div>
+      <div class="section-title row-title">
+        <span>Chores</span>
+        <a class="inline-link" href="?chores">Manage</a>
+      </div>
+      <div class="chore-list" id="chore-list"><p class="loading">Loading…</p></div>
       <div class="single-action">
         <button class="ghost" id="delete-btn">Delete account</button>
       </div>
@@ -417,6 +435,7 @@ function renderAccountBody(id, data) {
 
     listenTransactions(id);
     listenMonthlyTotals(id);
+    mountChoreList(document.getElementById("chore-list"), { accountId: id, accountName: data.name });
   }
 
   document.getElementById("hero-name").textContent = data.name;
@@ -573,6 +592,387 @@ function openTxModal(accountId, sign) {
     });
     await batch.commit();
     showToast(isAdd ? "Money added" : "Money subtracted");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Chores
+//
+// Chores live in a top-level `chores` collection. There's no server or cron job
+// behind this app, so nothing ever writes a chore back to "unclaimed" -- instead
+// each claim records the period it belongs to (today's date for a daily chore,
+// the week's Sunday for a weekly one, the month for a monthly one). A chore is
+// up for grabs again the moment the current period key stops matching the stored
+// one, so resets just happen on their own as the clock rolls over.
+//
+// Claiming is deliberately PIN-free (any kid can call a chore, and un-call it),
+// but turning a claimed chore into money needs the same PIN as "Add money".
+// ---------------------------------------------------------------------------
+
+const RESET_PERIODS = {
+  daily: { label: "Daily", resets: "Resets tomorrow" },
+  weekly: { label: "Weekly", resets: "Resets Sunday" },
+  monthly: { label: "Monthly", resets: "Resets on the 1st" },
+};
+
+function resetPeriodOf(chore) {
+  return RESET_PERIODS[chore.resetPeriod] ? chore.resetPeriod : "daily";
+}
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+// "Resets Sunday" -> "resets Sunday" (only the first letter, so day names keep
+// their capital when the label is used mid-sentence).
+function lowerFirst(str) {
+  return str.charAt(0).toLowerCase() + str.slice(1);
+}
+
+// A stable id for "the stretch of time this claim belongs to", in local time.
+function currentPeriodKey(resetPeriod, now = new Date()) {
+  const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  if (resetPeriod === "monthly") return `m:${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+  if (resetPeriod === "weekly") {
+    const sunday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+    return `w:${ymd(sunday)}`;
+  }
+  return `d:${ymd(now)}`;
+}
+
+// The claim on a chore, but only if it's from the period we're currently in --
+// an older claim means the chore has already reset and is free again.
+function activeClaim(chore) {
+  const claim = chore.claim;
+  if (!claim || !claim.accountId) return null;
+  return claim.periodKey === currentPeriodKey(resetPeriodOf(chore)) ? claim : null;
+}
+
+function choreRowHtml(chore, claim) {
+  const period = RESET_PERIODS[resetPeriodOf(chore)];
+  const name = escapeHtml(chore.name);
+  const amount = formatUSD(chore.amountCents);
+
+  if (!claim) {
+    return `
+      <div class="chore-row" data-id="${chore.id}">
+        <span class="chore-info">
+          <span class="chore-name">${name}</span>
+          <span class="chore-meta">${period.label} · ${period.resets}</span>
+        </span>
+        <span class="chore-amount">${amount}</span>
+        <span class="chore-actions">
+          <button class="small" data-act="claim">Claim</button>
+        </span>
+      </div>
+    `;
+  }
+
+  if (claim.approved) {
+    return `
+      <div class="chore-row done" data-id="${chore.id}">
+        <span class="chore-info">
+          <span class="chore-name">✓ ${name}</span>
+          <span class="chore-meta">${escapeHtml(claim.accountName)} got paid · ${lowerFirst(period.resets)}</span>
+        </span>
+        <span class="chore-amount">${amount}</span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="chore-row pending" data-id="${chore.id}">
+      <span class="chore-info">
+        <span class="chore-name">${name}</span>
+        <span class="chore-meta">Claimed by ${escapeHtml(claim.accountName)} · needs checking</span>
+      </span>
+      <span class="chore-amount">${amount}</span>
+      <span class="chore-actions">
+        <button class="small approve" data-act="approve">Check off</button>
+        <button class="ghost" data-act="unclaim">Unclaim</button>
+      </span>
+    </div>
+  `;
+}
+
+// Renders the chore list into `containerEl` and keeps it live. On an account
+// page (`accountId` given) claiming is one tap and other kids' claims are
+// hidden; on the dashboard, claiming asks who's claiming.
+function mountChoreList(containerEl, { accountId = null, accountName = null } = {}) {
+  let chores = [];
+
+  const render = () => {
+    if (!chores.length) {
+      containerEl.innerHTML = `<p class="empty chore-empty">No chores yet. Tap “Manage” to add one.</p>`;
+      return;
+    }
+
+    const groups = { available: [], pending: [], done: [] };
+    for (const chore of chores) {
+      const claim = activeClaim(chore);
+      // On a child's own page, only their own claims are worth showing.
+      if (claim && accountId && claim.accountId !== accountId) continue;
+      groups[!claim ? "available" : claim.approved ? "done" : "pending"].push([chore, claim]);
+    }
+
+    const section = (title, rows) =>
+      rows.length
+        ? `<div class="chore-group-label">${title}</div>${rows
+            .map(([chore, claim]) => choreRowHtml(chore, claim))
+            .join("")}`
+        : "";
+
+    containerEl.innerHTML =
+      section("Up for grabs", groups.available) +
+      section("Waiting to be checked", groups.pending) +
+      section("Done for now", groups.done) ||
+      `<p class="empty chore-empty">Nothing to claim right now.</p>`;
+  };
+
+  containerEl.addEventListener("click", (e) => {
+    const button = e.target.closest("button[data-act]");
+    if (!button) return;
+    const id = button.closest(".chore-row").dataset.id;
+    const chore = chores.find((c) => c.id === id);
+    if (!chore) return;
+    if (button.dataset.act === "claim") claimChore(chore, accountId, accountName);
+    else if (button.dataset.act === "approve") approveChore(chore);
+    else if (button.dataset.act === "unclaim") unclaimChore(chore);
+  });
+
+  onSnapshot(query(collection(db, "chores"), orderBy("createdAt")), (snap) => {
+    chores = [];
+    snap.forEach((docSnap) => chores.push({ id: docSnap.id, ...docSnap.data() }));
+    render();
+  });
+
+  // Nothing writes to the database when a chore resets, so a page left open
+  // overnight would keep showing yesterday's list. Re-render when the day flips.
+  let dayKey = currentPeriodKey("daily");
+  setInterval(() => {
+    const key = currentPeriodKey("daily");
+    if (key === dayKey) return;
+    dayKey = key;
+    render();
+  }, 60000);
+}
+
+async function claimChore(chore, accountId, accountName) {
+  let claimer = accountId ? { id: accountId, name: accountName } : await openAccountPickerModal(chore);
+  if (!claimer) return;
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const choreRef = doc(db, "chores", chore.id);
+      const snap = await tx.get(choreRef);
+      if (!snap.exists()) throw new Error("This chore was deleted.");
+      if (activeClaim({ id: chore.id, ...snap.data() })) {
+        throw new Error("Someone else just claimed that chore.");
+      }
+      tx.update(choreRef, {
+        "claim.accountId": claimer.id,
+        "claim.accountName": claimer.name,
+        "claim.periodKey": currentPeriodKey(resetPeriodOf(snap.data())),
+        "claim.claimedAt": serverTimestamp(),
+        "claim.approved": false,
+        "claim.approvedAt": null,
+      });
+    });
+  } catch (err) {
+    await openAlertModal(err.message || "Couldn't claim that chore.");
+    return;
+  }
+  showToast(`Claimed by ${claimer.name}`);
+}
+
+async function unclaimChore(chore) {
+  await updateDoc(doc(db, "chores", chore.id), { claim: null });
+  showToast("Chore released");
+}
+
+// Checking off a claimed chore is what actually moves money, so it takes the
+// same PIN as "Add money". Balance, transaction, and chore all update together.
+async function approveChore(chore) {
+  const claim = activeClaim(chore);
+  if (!claim) return;
+
+  const ok = await requirePin(`check off “${chore.name}”`);
+  if (!ok) return;
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const choreRef = doc(db, "chores", chore.id);
+      const accountRef = doc(db, "accounts", claim.accountId);
+      const choreSnap = await tx.get(choreRef);
+      const accountSnap = await tx.get(accountRef);
+
+      if (!choreSnap.exists()) throw new Error("This chore was deleted.");
+      const current = activeClaim({ id: chore.id, ...choreSnap.data() });
+      if (!current) throw new Error("That claim is no longer active.");
+      if (current.approved) throw new Error("That chore was already checked off.");
+      if (!accountSnap.exists()) throw new Error("That account no longer exists.");
+
+      const amountCents = choreSnap.data().amountCents;
+      tx.update(accountRef, { balanceCents: increment(amountCents) });
+      tx.set(doc(collection(db, "accounts", current.accountId, "transactions")), {
+        amountCents,
+        note: `Chore: ${choreSnap.data().name}`,
+        createdAt: serverTimestamp(),
+      });
+      tx.update(choreRef, { "claim.approved": true, "claim.approvedAt": serverTimestamp() });
+    });
+  } catch (err) {
+    await openAlertModal(err.message || "Couldn't check off that chore.");
+    return;
+  }
+  showToast(`${formatUSD(chore.amountCents)} added to ${claim.accountName}`);
+}
+
+function openAccountPickerModal(chore) {
+  return new Promise((resolve) => {
+    getDocs(collection(db, "accounts")).then(async (snap) => {
+      const accounts = [];
+      snap.forEach((docSnap) => accounts.push({ id: docSnap.id, name: docSnap.data().name }));
+      if (!accounts.length) {
+        await openAlertModal("Create an account first, then chores can be claimed.");
+        resolve(null);
+        return;
+      }
+
+      const overlay = buildModal(
+        `
+          <h2>Who's claiming this?</h2>
+          <p class="hint">${escapeHtml(chore.name)} — ${formatUSD(chore.amountCents)}</p>
+          <div class="picker-list">
+            ${accounts
+              .map(
+                (a) =>
+                  `<button class="secondary picker-option" data-id="${escapeHtml(a.id)}">${escapeHtml(a.name)}</button>`
+              )
+              .join("")}
+          </div>
+          <div class="modal-actions">
+            <button class="secondary" id="picker-cancel">Cancel</button>
+          </div>
+        `,
+        { onDismiss: () => resolve(null) }
+      );
+
+      overlay.querySelectorAll(".picker-option").forEach((button) => {
+        button.addEventListener("click", () => {
+          overlay.remove();
+          resolve(accounts.find((a) => a.id === button.dataset.id));
+        });
+      });
+      overlay.querySelector("#picker-cancel").addEventListener("click", () => {
+        overlay.remove();
+        resolve(null);
+      });
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Manage chores view: add and remove the chores that show up on the dashboard
+// ---------------------------------------------------------------------------
+
+function renderManageChoresView() {
+  $app.innerHTML = `
+    <a class="back-link" href="./">&larr; All accounts</a>
+    <h1><span class="emoji">🧹</span>Chores</h1>
+    <div class="card">
+      <form id="new-chore-form" class="new-account-form">
+        <input id="chore-name" type="text" placeholder="Chore (e.g. Take out the trash)" required autofocus />
+        <input id="chore-amount" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Worth (e.g. 1.50)" required />
+        <select id="chore-period">
+          <option value="daily">Resets daily</option>
+          <option value="weekly">Resets weekly (Sunday)</option>
+          <option value="monthly">Resets monthly (the 1st)</option>
+        </select>
+        <button type="submit">Add chore</button>
+      </form>
+      <p class="hint">Once a chore is claimed it's off the list until it resets. A parent
+      checks it off with the PIN to move the money into that account.</p>
+    </div>
+    <div class="section-title">All chores</div>
+    <div class="chore-list" id="manage-chore-list"><p class="loading">Loading…</p></div>
+  `;
+
+  document.getElementById("new-chore-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("chore-name").value.trim();
+    const amountCents = dollarsToCents(document.getElementById("chore-amount").value);
+    const resetPeriod = document.getElementById("chore-period").value;
+    if (!name) return;
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      await openAlertModal("Please enter an amount greater than $0.");
+      return;
+    }
+
+    const ok = await requirePin("add a chore");
+    if (!ok) return;
+
+    await addDoc(collection(db, "chores"), {
+      name,
+      amountCents,
+      resetPeriod,
+      claim: null,
+      createdAt: serverTimestamp(),
+    });
+    e.target.reset();
+    document.getElementById("chore-name").focus();
+    showToast("Chore added");
+  });
+
+  const listEl = document.getElementById("manage-chore-list");
+  let chores = [];
+
+  onSnapshot(query(collection(db, "chores"), orderBy("createdAt")), (snap) => {
+    chores = [];
+    snap.forEach((docSnap) => chores.push({ id: docSnap.id, ...docSnap.data() }));
+    if (!chores.length) {
+      listEl.innerHTML = `<p class="empty">No chores yet.</p>`;
+      return;
+    }
+    listEl.innerHTML = chores
+      .map((chore) => {
+        const claim = activeClaim(chore);
+        const status = !claim
+          ? RESET_PERIODS[resetPeriodOf(chore)].label
+          : `${RESET_PERIODS[resetPeriodOf(chore)].label} · ${claim.approved ? "done by" : "claimed by"} ${escapeHtml(claim.accountName)}`;
+        return `
+          <div class="chore-row" data-id="${chore.id}">
+            <span class="chore-info">
+              <span class="chore-name">${escapeHtml(chore.name)}</span>
+              <span class="chore-meta">${status}</span>
+            </span>
+            <span class="chore-amount">${formatUSD(chore.amountCents)}</span>
+            <span class="chore-actions">
+              <button class="ghost" data-act="delete">Delete</button>
+            </span>
+          </div>
+        `;
+      })
+      .join("");
+  });
+
+  listEl.addEventListener("click", async (e) => {
+    const button = e.target.closest("button[data-act='delete']");
+    if (!button) return;
+    const chore = chores.find((c) => c.id === button.closest(".chore-row").dataset.id);
+    if (!chore) return;
+
+    const confirmed = await openConfirmModal({
+      title: "Delete chore?",
+      message: `Remove “${chore.name}” from the chore list? Money already paid out stays put.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!confirmed) return;
+    const ok = await requirePin(`delete “${chore.name}”`);
+    if (!ok) return;
+    await deleteDoc(doc(db, "chores", chore.id));
+    showToast("Chore deleted");
   });
 }
 

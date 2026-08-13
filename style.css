@@ -239,6 +239,86 @@ button:disabled { opacity: 0.5; cursor: default; }
   margin: 22px 0 8px;
 }
 
+.row-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.inline-link {
+  color: var(--brand);
+  text-decoration: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+/* Chores */
+.chore-list { display: flex; flex-direction: column; gap: 8px; }
+
+.chore-empty { margin-top: 10px; }
+
+.chore-group-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.chore-group-label:first-child { margin-top: 0; }
+
+.chore-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+.chore-row.pending {
+  border-color: #e7c168;
+  background: #fffaef;
+}
+
+.chore-row.done {
+  background: var(--green-bg);
+  border-color: #c6ead6;
+}
+
+.chore-info { flex: 1 1 55%; min-width: 0; }
+.chore-name { display: block; font-weight: 500; }
+.chore-meta { display: block; font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+
+.chore-amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--green);
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.chore-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+button.approve { background: var(--green); }
+button.approve:active { background: #157f4a; }
+
+.picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.picker-option { width: 100%; }
+
 .tx-list { display: flex; flex-direction: column; gap: 8px; }
 
 .tx-row {
@@ -265,11 +345,14 @@ button:disabled { opacity: 0.5; cursor: default; }
   gap: 10px;
 }
 
-.new-account-form input {
+.new-account-form input,
+.new-account-form select {
   font: inherit;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
 }
 
 /* Modal */
