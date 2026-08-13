@@ -29,6 +29,16 @@ service cloud.firestore {
       }
     }
 
+    match /chores/{choreId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['name', 'amountCents', 'resetPeriod'])
+                             && request.resource.data.name is string
+                             && request.resource.data.amountCents is int
+                             && request.resource.data.amountCents > 0
+                             && request.resource.data.resetPeriod in ['daily', 'weekly', 'monthly'];
+      allow delete: if true;
+    }
+
     match /settings/config {
       allow read, write: if true;
     }
