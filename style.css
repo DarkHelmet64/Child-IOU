@@ -170,11 +170,11 @@ button:disabled { opacity: 0.5; cursor: default; }
 .subtract-btn { background: var(--red); }
 .subtract-btn:active { background: #ad2c2f; }
 
-.primary-action {
+.full-action {
   display: block;
   width: 100%;
   text-align: center;
-  margin-top: 10px;
+  margin-top: 22px;
 }
 
 .single-action {
@@ -256,6 +256,17 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 /* Chores */
 .chore-list { display: flex; flex-direction: column; gap: 8px; }
+
+/* Claimed chores, hoisted to the top of the dashboard. Collapses away entirely
+   when nothing is waiting, so the accounts stay where they normally sit. */
+.chore-pending-top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.chore-pending-top:empty { display: none; }
 
 .chore-empty { margin-top: 10px; }
 

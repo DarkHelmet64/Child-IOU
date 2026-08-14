@@ -29,6 +29,21 @@ service cloud.firestore {
       }
     }
 
+    // Chores are shared by the whole family rather than owned by one account.
+    // Without this block Firestore denies everything here by default, and the
+    // chore list can't load or be added to at all.
+    match /chores/{choreId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['name', 'amountCents', 'resetPeriod'])
+                             && request.resource.data.name is string
+                             && request.resource.data.amountCents is int
+                             && request.resource.data.amountCents > 0
+                             && request.resource.data.resetPeriod in ['daily', 'weekly', 'monthly', 'once']
+                             && (!request.resource.data.keys().hasAny(['pastCredits'])
+                                 || request.resource.data.pastCredits is map);
+      allow delete: if true;
+    }
+
     match /settings/config {
       allow read, write: if true;
     }
