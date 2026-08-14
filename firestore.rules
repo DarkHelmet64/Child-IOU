@@ -29,6 +29,9 @@ service cloud.firestore {
       }
     }
 
+    // Chores are shared by the whole family rather than owned by one account.
+    // Without this block Firestore denies everything here by default, and the
+    // chore list can't load or be added to at all.
     match /chores/{choreId} {
       allow read: if true;
       allow create, update: if request.resource.data.keys().hasAll(['name', 'amountCents', 'resetPeriod'])
