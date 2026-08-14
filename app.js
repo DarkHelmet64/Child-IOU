@@ -609,14 +609,35 @@ function openTxModal(accountId, sign) {
 // but turning a claimed chore into money needs the same PIN as "Add money".
 // ---------------------------------------------------------------------------
 
+// A one-time chore is just a chore whose period never ends: `resets` is empty
+// because there's no "and then it comes back" to promise, and its period key is
+// a constant, so the claim on it stays current forever instead of aging out.
 const RESET_PERIODS = {
   daily: { label: "Daily", resets: "Resets tomorrow" },
   weekly: { label: "Weekly", resets: "Resets Sunday" },
   monthly: { label: "Monthly", resets: "Resets on the 1st" },
+  once: { label: "One-time", resets: "" },
 };
 
 function resetPeriodOf(chore) {
   return RESET_PERIODS[chore.resetPeriod] ? chore.resetPeriod : "daily";
+}
+
+function repeats(chore) {
+  return resetPeriodOf(chore) !== "once";
+}
+
+// Every chore list reads the same way: daily first, then weekly, then monthly,
+// then the one-offs, alphabetical within each. The database query orders by
+// `createdAt`, which only matters now as a stable tiebreak between two chores
+// with the same name.
+const RESET_PERIOD_ORDER = Object.keys(RESET_PERIODS);
+
+function compareChores(a, b) {
+  const byPeriod =
+    RESET_PERIOD_ORDER.indexOf(resetPeriodOf(a)) - RESET_PERIOD_ORDER.indexOf(resetPeriodOf(b));
+  if (byPeriod !== 0) return byPeriod;
+  return (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" });
 }
 
 function pad2(n) {
@@ -641,15 +662,21 @@ function choreLoadErrorHtml(err) {
   return `<p class="empty chore-empty">${message}</p>`;
 }
 
-// A stable id for "the stretch of time this claim belongs to", in local time.
-function currentPeriodKey(resetPeriod, now = new Date()) {
+// A stable id for "the stretch of time a claim belongs to", in local time, for
+// whichever period `date` falls in.
+function periodKeyFor(resetPeriod, date) {
   const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-  if (resetPeriod === "monthly") return `m:${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+  if (resetPeriod === "once") return "once";
+  if (resetPeriod === "monthly") return `m:${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
   if (resetPeriod === "weekly") {
-    const sunday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+    const sunday = new Date(date.getFullYear(), date.getMonth(), date.getDate() - date.getDay());
     return `w:${ymd(sunday)}`;
   }
-  return `d:${ymd(now)}`;
+  return `d:${ymd(date)}`;
+}
+
+function currentPeriodKey(resetPeriod, now = new Date()) {
+  return periodKeyFor(resetPeriod, now);
 }
 
 // The claim on a chore, but only if it's from the period we're currently in --
@@ -660,6 +687,71 @@ function activeClaim(chore) {
   return claim.periodKey === currentPeriodKey(resetPeriodOf(chore)) ? claim : null;
 }
 
+// How many finished periods back "Credit a past chore" will offer.
+const PAST_CREDIT_LOOKBACK = { daily: 6, weekly: 4, monthly: 3 };
+
+// The finished periods a chore can still be credited for, most recent first.
+// Each one carries the key it would be recorded under, a label for the picker,
+// and the shorter wording that goes in the transaction note.
+function pastPeriods(resetPeriod, now = new Date()) {
+  const monthDay = (d) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const periods = [];
+
+  for (let ago = 1; ago <= PAST_CREDIT_LOOKBACK[resetPeriod]; ago++) {
+    let start;
+    let label;
+    let note;
+
+    if (resetPeriod === "monthly") {
+      start = new Date(now.getFullYear(), now.getMonth() - ago, 1);
+      const sameYear = start.getFullYear() === now.getFullYear();
+      const month = start.toLocaleDateString(undefined, {
+        month: "long",
+        ...(sameYear ? {} : { year: "numeric" }),
+      });
+      label = ago === 1 ? `Last month (${month})` : month;
+      note = month;
+    } else if (resetPeriod === "weekly") {
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay() - 7 * ago);
+      const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+      label = ago === 1 ? `Last week (${monthDay(start)}–${monthDay(end)})` : `Week of ${monthDay(start)}`;
+      note = `week of ${monthDay(start)}`;
+    } else {
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ago);
+      const weekday = start.toLocaleDateString(undefined, { weekday: "long" });
+      label = ago === 1 ? `Yesterday (${monthDay(start)})` : `${weekday} (${monthDay(start)})`;
+      note = monthDay(start);
+    }
+
+    periods.push({ key: periodKeyFor(resetPeriod, start), label, note });
+  }
+
+  return periods;
+}
+
+// Who already got paid for `periodKey`, if anyone: either a past credit, or a
+// claim that was checked off back while that period was still the current one.
+function paidNameFor(chore, periodKey) {
+  const credit = (chore.pastCredits || {})[periodKey];
+  if (credit) return credit.accountName;
+  const claim = chore.claim;
+  if (claim && claim.approved && claim.periodKey === periodKey) return claim.accountName;
+  return null;
+}
+
+// The frequency doubles as the row's color (see `.chore-row[data-period]`), so
+// every row carries the period it belongs to.
+function choreRowAttrs(chore, extraClass = "") {
+  return `class="chore-row${extraClass ? ` ${extraClass}` : ""}" data-period="${resetPeriodOf(chore)}" data-id="${chore.id}"`;
+}
+
+// "Daily · Resets tomorrow", but just "One-time" for a chore that never comes
+// back -- there's no reset to describe.
+function chorePeriodMeta(chore) {
+  const period = RESET_PERIODS[resetPeriodOf(chore)];
+  return `<span class="chore-period">${period.label}</span>${period.resets ? ` · ${period.resets}` : ""}`;
+}
+
 function choreRowHtml(chore, claim) {
   const period = RESET_PERIODS[resetPeriodOf(chore)];
   const name = escapeHtml(chore.name);
@@ -667,10 +759,10 @@ function choreRowHtml(chore, claim) {
 
   if (!claim) {
     return `
-      <div class="chore-row" data-id="${chore.id}">
+      <div ${choreRowAttrs(chore)}>
         <span class="chore-info">
           <span class="chore-name">${name}</span>
-          <span class="chore-meta">${period.label} · ${period.resets}</span>
+          <span class="chore-meta">${chorePeriodMeta(chore)}</span>
         </span>
         <span class="chore-amount">${amount}</span>
         <span class="chore-actions">
@@ -681,19 +773,28 @@ function choreRowHtml(chore, claim) {
   }
 
   if (claim.approved) {
+    // A one-time chore is finished for good once it's paid, so it offers a way
+    // off the list instead of a promise to come back.
     return `
-      <div class="chore-row done" data-id="${chore.id}">
+      <div ${choreRowAttrs(chore, "done")}>
         <span class="chore-info">
           <span class="chore-name">✓ ${name}</span>
-          <span class="chore-meta">${escapeHtml(claim.accountName)} got paid · ${lowerFirst(period.resets)}</span>
+          <span class="chore-meta">${escapeHtml(claim.accountName)} got paid${
+            period.resets ? ` · ${lowerFirst(period.resets)}` : ""
+          }</span>
         </span>
         <span class="chore-amount">${amount}</span>
+        ${
+          repeats(chore)
+            ? ""
+            : `<span class="chore-actions"><button class="ghost" data-act="remove">Remove</button></span>`
+        }
       </div>
     `;
   }
 
   return `
-    <div class="chore-row pending" data-id="${chore.id}">
+    <div ${choreRowAttrs(chore, "pending")}>
       <span class="chore-info">
         <span class="chore-name">${name}</span>
         <span class="chore-meta">Claimed by ${escapeHtml(claim.accountName)} · needs checking</span>
@@ -719,12 +820,19 @@ function mountChoreList(containerEl, { accountId = null, accountName = null } = 
       return;
     }
 
-    const groups = { available: [], pending: [], done: [] };
+    const groups = { available: [], pending: [], done: [], finished: [] };
     for (const chore of chores) {
       const claim = activeClaim(chore);
       // On a child's own page, only their own claims are worth showing.
       if (claim && accountId && claim.accountId !== accountId) continue;
-      groups[!claim ? "available" : claim.approved ? "done" : "pending"].push([chore, claim]);
+      const group = !claim
+        ? "available"
+        : !claim.approved
+          ? "pending"
+          : repeats(chore)
+            ? "done"
+            : "finished";
+      groups[group].push([chore, claim]);
     }
 
     const section = (title, rows) =>
@@ -734,22 +842,37 @@ function mountChoreList(containerEl, { accountId = null, accountName = null } = 
             .join("")}`
         : "";
 
-    containerEl.innerHTML =
+    const rows =
       section("Up for grabs", groups.available) +
       section("Waiting to be checked", groups.pending) +
-      section("Done for now", groups.done) ||
+      section("Done for now", groups.done) +
+      section("Finished", groups.finished) ||
       `<p class="empty chore-empty">Nothing to claim right now.</p>`;
+
+    // A recurring chore that reset before anyone checked it off can't be claimed
+    // any more, so there's a way in to pay one out after the fact. One-time
+    // chores never reset, so a list of only those has nothing to offer here.
+    containerEl.innerHTML = `${rows}${
+      chores.some(repeats)
+        ? `<button class="ghost past-credit-btn" data-act="past-credit">Credit a past chore</button>`
+        : ""
+    }`;
   };
 
   containerEl.addEventListener("click", (e) => {
     const button = e.target.closest("button[data-act]");
     if (!button) return;
+    if (button.dataset.act === "past-credit") {
+      openPastCreditModal(chores.filter(repeats), { accountId, accountName });
+      return;
+    }
     const id = button.closest(".chore-row").dataset.id;
     const chore = chores.find((c) => c.id === id);
     if (!chore) return;
     if (button.dataset.act === "claim") claimChore(chore, accountId, accountName);
     else if (button.dataset.act === "approve") approveChore(chore);
     else if (button.dataset.act === "unclaim") unclaimChore(chore);
+    else if (button.dataset.act === "remove") deleteChore(chore);
   });
 
   onSnapshot(
@@ -757,6 +880,7 @@ function mountChoreList(containerEl, { accountId = null, accountName = null } = 
     (snap) => {
       chores = [];
       snap.forEach((docSnap) => chores.push({ id: docSnap.id, ...docSnap.data() }));
+      chores.sort(compareChores);
       render();
     },
     (err) => {
@@ -808,6 +932,21 @@ async function unclaimChore(chore) {
   showToast("Chore released");
 }
 
+// Used from the manage screen and from a finished one-time chore's "Remove".
+async function deleteChore(chore) {
+  const confirmed = await openConfirmModal({
+    title: "Delete chore?",
+    message: `Remove “${chore.name}” from the chore list? Money already paid out stays put.`,
+    confirmLabel: "Delete",
+    danger: true,
+  });
+  if (!confirmed) return;
+  const ok = await requirePin(`delete “${chore.name}”`);
+  if (!ok) return;
+  await deleteDoc(doc(db, "chores", chore.id));
+  showToast("Chore deleted");
+}
+
 // Checking off a claimed chore is what actually moves money, so it takes the
 // same PIN as "Add money". Balance, transaction, and chore all update together.
 async function approveChore(chore) {
@@ -844,6 +983,147 @@ async function approveChore(chore) {
     return;
   }
   showToast(`${formatUSD(chore.amountCents)} added to ${claim.accountName}`);
+}
+
+// "They did it yesterday and nobody checked it off." A claim only ever covers
+// the period it was made in, so once a chore resets there's nothing left to
+// check off -- this pays the chore out against the finished period it was
+// actually done in, and records that period on the chore so it can't be paid
+// twice. Like checking off, it moves money, so it takes the PIN.
+async function openPastCreditModal(chores, { accountId = null, accountName = null } = {}) {
+  if (!chores.length) return;
+
+  let accounts = accountId ? [{ id: accountId, name: accountName }] : [];
+  if (!accountId) {
+    const snap = await getDocs(collection(db, "accounts"));
+    snap.forEach((docSnap) => accounts.push({ id: docSnap.id, name: docSnap.data().name }));
+    if (!accounts.length) {
+      await openAlertModal("Create an account first, then past chores can be credited.");
+      return;
+    }
+  }
+
+  const overlay = buildModal(`
+    <h2>Credit a past chore</h2>
+    <p class="hint">For a chore that got done but never checked off before it reset.</p>
+    <label for="past-chore">Chore</label>
+    <select id="past-chore">
+      ${chores
+        .map(
+          (chore) =>
+            `<option value="${escapeHtml(chore.id)}">${escapeHtml(chore.name)} — ${formatUSD(chore.amountCents)}</option>`
+        )
+        .join("")}
+    </select>
+    <label for="past-when">When was it done?</label>
+    <select id="past-when"></select>
+    ${
+      accountId
+        ? ""
+        : `<label for="past-who">Who did it?</label>
+           <select id="past-who">
+             ${accounts
+               .map((a) => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`)
+               .join("")}
+           </select>`
+    }
+    <div class="modal-actions">
+      <button class="secondary" id="past-cancel">Cancel</button>
+      <button id="past-submit">Give credit</button>
+    </div>
+  `);
+
+  const choreSelect = overlay.querySelector("#past-chore");
+  const whenSelect = overlay.querySelector("#past-when");
+  const whoSelect = overlay.querySelector("#past-who");
+  const submitButton = overlay.querySelector("#past-submit");
+  let periods = [];
+
+  // The "when" choices depend on how the selected chore resets, so they're
+  // rebuilt whenever it changes. Periods somebody was already paid for stay
+  // visible (they explain themselves) but can't be picked again.
+  const fillWhenOptions = () => {
+    const chore = chores.find((c) => c.id === choreSelect.value);
+    periods = pastPeriods(resetPeriodOf(chore));
+    whenSelect.innerHTML = periods
+      .map((period) => {
+        const paidName = paidNameFor(chore, period.key);
+        const label = paidName ? `${period.label} — already paid to ${paidName}` : period.label;
+        return `<option value="${period.key}"${paidName ? " disabled" : ""}>${escapeHtml(label)}</option>`;
+      })
+      .join("");
+    const firstOpen = periods.find((period) => !paidNameFor(chore, period.key));
+    if (firstOpen) whenSelect.value = firstOpen.key;
+    submitButton.disabled = !firstOpen;
+  };
+
+  choreSelect.addEventListener("change", fillWhenOptions);
+  fillWhenOptions();
+
+  overlay.querySelector("#past-cancel").addEventListener("click", () => overlay.remove());
+  submitButton.addEventListener("click", () => {
+    const chore = chores.find((c) => c.id === choreSelect.value);
+    const period = periods.find((p) => p.key === whenSelect.value);
+    const account = accounts.find((a) => a.id === (accountId || whoSelect.value));
+    if (!chore || !period || !account) return;
+    overlay.remove();
+    creditPastChore(chore, period, account);
+  });
+}
+
+async function creditPastChore(chore, period, account) {
+  const ok = await requirePin(`credit “${chore.name}” to ${account.name}`);
+  if (!ok) return;
+
+  let amountCents = chore.amountCents;
+  try {
+    await runTransaction(db, async (tx) => {
+      const choreRef = doc(db, "chores", chore.id);
+      const accountRef = doc(db, "accounts", account.id);
+      const choreSnap = await tx.get(choreRef);
+      const accountSnap = await tx.get(accountRef);
+
+      if (!choreSnap.exists()) throw new Error("This chore was deleted.");
+      if (!accountSnap.exists()) throw new Error("That account no longer exists.");
+      const data = { id: chore.id, ...choreSnap.data() };
+      const paidName = paidNameFor(data, period.key);
+      if (paidName) throw new Error(`${paidName} was already paid for that one.`);
+
+      amountCents = data.amountCents;
+      tx.update(accountRef, { balanceCents: increment(amountCents) });
+      tx.set(doc(collection(db, "accounts", account.id, "transactions")), {
+        amountCents,
+        note: `Chore: ${data.name} (${period.note})`,
+        createdAt: serverTimestamp(),
+      });
+      tx.update(choreRef, {
+        pastCredits: withPastCredit(data, period.key, account),
+      });
+    });
+  } catch (err) {
+    await openAlertModal(err.message || "Couldn't credit that chore.");
+    return;
+  }
+  showToast(`${formatUSD(amountCents)} added to ${account.name}`);
+}
+
+// Past credits are a map on the chore itself, keyed by period, which is what
+// keeps a period from being paid twice. The whole map is rewritten rather than
+// patched because the keys contain characters Firestore field paths reserve.
+// Periods older than the picker's own window can never be chosen again, so they
+// get dropped on the way through and the map stays small.
+function withPastCredit(chore, periodKey, account, now = new Date()) {
+  const stillOffered = new Set(pastPeriods(resetPeriodOf(chore), now).map((period) => period.key));
+  const credits = {};
+  for (const [key, credit] of Object.entries(chore.pastCredits || {})) {
+    if (stillOffered.has(key)) credits[key] = credit;
+  }
+  credits[periodKey] = {
+    accountId: account.id,
+    accountName: account.name,
+    creditedAt: serverTimestamp(),
+  };
+  return credits;
 }
 
 function openAccountPickerModal(chore) {
@@ -906,11 +1186,13 @@ function renderManageChoresView() {
           <option value="daily">Resets daily</option>
           <option value="weekly">Resets weekly (Sunday)</option>
           <option value="monthly">Resets monthly (the 1st)</option>
+          <option value="once">One-time (never resets)</option>
         </select>
         <button type="submit">Add chore</button>
       </form>
       <p class="hint">Once a chore is claimed it's off the list until it resets. A parent
-      checks it off with the PIN to move the money into that account.</p>
+      checks it off with the PIN to move the money into that account. A one-time chore
+      never resets — once it's checked off it's finished, and you can remove it.</p>
     </div>
     <div class="section-title">All chores</div>
     <div class="chore-list" id="manage-chore-list"><p class="loading">Loading…</p></div>
@@ -950,6 +1232,7 @@ function renderManageChoresView() {
     (snap) => {
       chores = [];
       snap.forEach((docSnap) => chores.push({ id: docSnap.id, ...docSnap.data() }));
+      chores.sort(compareChores);
       if (!chores.length) {
         listEl.innerHTML = `<p class="empty">No chores yet.</p>`;
         return;
@@ -957,11 +1240,12 @@ function renderManageChoresView() {
       listEl.innerHTML = chores
         .map((chore) => {
           const claim = activeClaim(chore);
+          const label = `<span class="chore-period">${RESET_PERIODS[resetPeriodOf(chore)].label}</span>`;
           const status = !claim
-            ? RESET_PERIODS[resetPeriodOf(chore)].label
-            : `${RESET_PERIODS[resetPeriodOf(chore)].label} · ${claim.approved ? "done by" : "claimed by"} ${escapeHtml(claim.accountName)}`;
+            ? label
+            : `${label} · ${claim.approved ? "done by" : "claimed by"} ${escapeHtml(claim.accountName)}`;
           return `
-            <div class="chore-row" data-id="${chore.id}">
+            <div ${choreRowAttrs(chore)}>
               <span class="chore-info">
                 <span class="chore-name">${escapeHtml(chore.name)}</span>
                 <span class="chore-meta">${status}</span>
@@ -980,23 +1264,11 @@ function renderManageChoresView() {
     }
   );
 
-  listEl.addEventListener("click", async (e) => {
+  listEl.addEventListener("click", (e) => {
     const button = e.target.closest("button[data-act='delete']");
     if (!button) return;
     const chore = chores.find((c) => c.id === button.closest(".chore-row").dataset.id);
-    if (!chore) return;
-
-    const confirmed = await openConfirmModal({
-      title: "Delete chore?",
-      message: `Remove “${chore.name}” from the chore list? Money already paid out stays put.`,
-      confirmLabel: "Delete",
-      danger: true,
-    });
-    if (!confirmed) return;
-    const ok = await requirePin(`delete “${chore.name}”`);
-    if (!ok) return;
-    await deleteDoc(doc(db, "chores", chore.id));
-    showToast("Chore deleted");
+    if (chore) deleteChore(chore);
   });
 }
 
