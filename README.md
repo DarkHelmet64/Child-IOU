@@ -91,10 +91,17 @@ child's page open will see the change too.
 
 Chores are shared by the whole family, not attached to one child. From the
 admin screen, tap **More > Manage chores** to add one: a name, what it's
-worth, and whether it resets **daily**, **weekly** (Sunday), or **monthly**
-(the 1st). Adding or deleting a chore asks for the PIN.
+worth, and how often it comes back — **daily**, **weekly** (Sunday),
+**monthly** (the 1st), or **one-time**, for something that only needs doing
+once ("clean out the attic"). Adding or deleting a chore asks for the PIN.
 
-The admin screen then lists what's available right now, in three groups:
+Chore lists are always ordered the same way: daily chores first, then weekly,
+then monthly, then the one-offs, and alphabetically within each of those.
+Each row is color-coded by how often it comes back — a colored stripe down
+its left edge and the same color on the frequency word under the name. Blue
+is daily, purple weekly, orange monthly, and **green is one-time**.
+
+The admin screen then lists what's available right now, in four groups:
 
 1. **Up for grabs** — tap **Claim** and pick which child is doing it. (From
    a child's own account page it's a single tap, and only that child's
@@ -106,12 +113,33 @@ The admin screen then lists what's available right now, in three groups:
    logs a "Chore: …" transaction. **Unclaim** hands it back with no PIN, in
    case the wrong name was tapped.
 3. **Done for now** — checked off and paid, until the chore resets.
+4. **Finished** — a one-time chore that's been paid. It doesn't come back,
+   so it has a **Remove** button (PIN, like any delete) to clear it off the
+   list once you're done with it.
 
 Resets aren't a scheduled job — there's no server to run one. Each claim
 records the day, week, or month it belongs to, so a chore simply becomes
 claimable again the moment the calendar rolls past that period (using the
-device's own local time). Deleting a chore doesn't touch money already paid
-out for it.
+device's own local time). A one-time chore is the same idea with a period
+that never ends: its claim never ages out, so it stays claimed and then
+finished. Deleting a chore doesn't touch money already paid out for it.
+
+### Credit for a chore that already reset
+
+A claim only covers the period it was made in, so a chore that got done
+yesterday but never checked off can't be checked off today — by then it's
+back up for grabs. **Credit a past chore**, under the chore list, pays one
+out after the fact: pick the chore, when it was done (the last 6 days for a
+daily chore, 4 weeks for a weekly one, 3 months for a monthly one), and who
+did it. From a child's own page the "who" is already known and isn't asked.
+One-time chores aren't listed there — they never reset, so one that got done
+yesterday is still sitting on the list waiting to be claimed.
+
+It takes the PIN, like checking one off, and adds the chore's value to that
+child's balance with the date in the note ("Chore: Take out the trash
+(Aug 13)"). Each past period can only be paid once — a period someone was
+already paid for is shown greyed out with their name, whether they were paid
+by a check-off at the time or by a past credit since.
 
 ## Security note
 
