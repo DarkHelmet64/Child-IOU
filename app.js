@@ -609,19 +609,28 @@ function openTxModal(accountId, sign) {
 // but turning a claimed chore into money needs the same PIN as "Add money".
 // ---------------------------------------------------------------------------
 
+// A one-time chore is just a chore whose period never ends: `resets` is empty
+// because there's no "and then it comes back" to promise, and its period key is
+// a constant, so the claim on it stays current forever instead of aging out.
 const RESET_PERIODS = {
   daily: { label: "Daily", resets: "Resets tomorrow" },
   weekly: { label: "Weekly", resets: "Resets Sunday" },
   monthly: { label: "Monthly", resets: "Resets on the 1st" },
+  once: { label: "One-time", resets: "" },
 };
 
 function resetPeriodOf(chore) {
   return RESET_PERIODS[chore.resetPeriod] ? chore.resetPeriod : "daily";
 }
 
+function repeats(chore) {
+  return resetPeriodOf(chore) !== "once";
+}
+
 // Every chore list reads the same way: daily first, then weekly, then monthly,
-// alphabetical within each. The database query orders by `createdAt`, which
-// only matters now as a stable tiebreak between two chores with the same name.
+// then the one-offs, alphabetical within each. The database query orders by
+// `createdAt`, which only matters now as a stable tiebreak between two chores
+// with the same name.
 const RESET_PERIOD_ORDER = Object.keys(RESET_PERIODS);
 
 function compareChores(a, b) {
@@ -657,6 +666,7 @@ function choreLoadErrorHtml(err) {
 // whichever period `date` falls in.
 function periodKeyFor(resetPeriod, date) {
   const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  if (resetPeriod === "once") return "once";
   if (resetPeriod === "monthly") return `m:${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
   if (resetPeriod === "weekly") {
     const sunday = new Date(date.getFullYear(), date.getMonth(), date.getDate() - date.getDay());
@@ -729,6 +739,19 @@ function paidNameFor(chore, periodKey) {
   return null;
 }
 
+// The frequency doubles as the row's color (see `.chore-row[data-period]`), so
+// every row carries the period it belongs to.
+function choreRowAttrs(chore, extraClass = "") {
+  return `class="chore-row${extraClass ? ` ${extraClass}` : ""}" data-period="${resetPeriodOf(chore)}" data-id="${chore.id}"`;
+}
+
+// "Daily · Resets tomorrow", but just "One-time" for a chore that never comes
+// back -- there's no reset to describe.
+function chorePeriodMeta(chore) {
+  const period = RESET_PERIODS[resetPeriodOf(chore)];
+  return `<span class="chore-period">${period.label}</span>${period.resets ? ` · ${period.resets}` : ""}`;
+}
+
 function choreRowHtml(chore, claim) {
   const period = RESET_PERIODS[resetPeriodOf(chore)];
   const name = escapeHtml(chore.name);
@@ -736,10 +759,10 @@ function choreRowHtml(chore, claim) {
 
   if (!claim) {
     return `
-      <div class="chore-row" data-id="${chore.id}">
+      <div ${choreRowAttrs(chore)}>
         <span class="chore-info">
           <span class="chore-name">${name}</span>
-          <span class="chore-meta">${period.label} · ${period.resets}</span>
+          <span class="chore-meta">${chorePeriodMeta(chore)}</span>
         </span>
         <span class="chore-amount">${amount}</span>
         <span class="chore-actions">
@@ -750,19 +773,28 @@ function choreRowHtml(chore, claim) {
   }
 
   if (claim.approved) {
+    // A one-time chore is finished for good once it's paid, so it offers a way
+    // off the list instead of a promise to come back.
     return `
-      <div class="chore-row done" data-id="${chore.id}">
+      <div ${choreRowAttrs(chore, "done")}>
         <span class="chore-info">
           <span class="chore-name">✓ ${name}</span>
-          <span class="chore-meta">${escapeHtml(claim.accountName)} got paid · ${lowerFirst(period.resets)}</span>
+          <span class="chore-meta">${escapeHtml(claim.accountName)} got paid${
+            period.resets ? ` · ${lowerFirst(period.resets)}` : ""
+          }</span>
         </span>
         <span class="chore-amount">${amount}</span>
+        ${
+          repeats(chore)
+            ? ""
+            : `<span class="chore-actions"><button class="ghost" data-act="remove">Remove</button></span>`
+        }
       </div>
     `;
   }
 
   return `
-    <div class="chore-row pending" data-id="${chore.id}">
+    <div ${choreRowAttrs(chore, "pending")}>
       <span class="chore-info">
         <span class="chore-name">${name}</span>
         <span class="chore-meta">Claimed by ${escapeHtml(claim.accountName)} · needs checking</span>
@@ -788,12 +820,19 @@ function mountChoreList(containerEl, { accountId = null, accountName = null } = 
       return;
     }
 
-    const groups = { available: [], pending: [], done: [] };
+    const groups = { available: [], pending: [], done: [], finished: [] };
     for (const chore of chores) {
       const claim = activeClaim(chore);
       // On a child's own page, only their own claims are worth showing.
       if (claim && accountId && claim.accountId !== accountId) continue;
-      groups[!claim ? "available" : claim.approved ? "done" : "pending"].push([chore, claim]);
+      const group = !claim
+        ? "available"
+        : !claim.approved
+          ? "pending"
+          : repeats(chore)
+            ? "done"
+            : "finished";
+      groups[group].push([chore, claim]);
     }
 
     const section = (title, rows) =>
@@ -806,20 +845,25 @@ function mountChoreList(containerEl, { accountId = null, accountName = null } = 
     const rows =
       section("Up for grabs", groups.available) +
       section("Waiting to be checked", groups.pending) +
-      section("Done for now", groups.done) ||
+      section("Done for now", groups.done) +
+      section("Finished", groups.finished) ||
       `<p class="empty chore-empty">Nothing to claim right now.</p>`;
 
-    // A chore that reset before anyone checked it off can't be claimed any more,
-    // so there's always a way in to pay one out after the fact.
-    containerEl.innerHTML = `${rows}
-      <button class="ghost past-credit-btn" data-act="past-credit">Credit a past chore</button>`;
+    // A recurring chore that reset before anyone checked it off can't be claimed
+    // any more, so there's a way in to pay one out after the fact. One-time
+    // chores never reset, so a list of only those has nothing to offer here.
+    containerEl.innerHTML = `${rows}${
+      chores.some(repeats)
+        ? `<button class="ghost past-credit-btn" data-act="past-credit">Credit a past chore</button>`
+        : ""
+    }`;
   };
 
   containerEl.addEventListener("click", (e) => {
     const button = e.target.closest("button[data-act]");
     if (!button) return;
     if (button.dataset.act === "past-credit") {
-      openPastCreditModal(chores, { accountId, accountName });
+      openPastCreditModal(chores.filter(repeats), { accountId, accountName });
       return;
     }
     const id = button.closest(".chore-row").dataset.id;
@@ -828,6 +872,7 @@ function mountChoreList(containerEl, { accountId = null, accountName = null } = 
     if (button.dataset.act === "claim") claimChore(chore, accountId, accountName);
     else if (button.dataset.act === "approve") approveChore(chore);
     else if (button.dataset.act === "unclaim") unclaimChore(chore);
+    else if (button.dataset.act === "remove") deleteChore(chore);
   });
 
   onSnapshot(
@@ -885,6 +930,21 @@ async function claimChore(chore, accountId, accountName) {
 async function unclaimChore(chore) {
   await updateDoc(doc(db, "chores", chore.id), { claim: null });
   showToast("Chore released");
+}
+
+// Used from the manage screen and from a finished one-time chore's "Remove".
+async function deleteChore(chore) {
+  const confirmed = await openConfirmModal({
+    title: "Delete chore?",
+    message: `Remove “${chore.name}” from the chore list? Money already paid out stays put.`,
+    confirmLabel: "Delete",
+    danger: true,
+  });
+  if (!confirmed) return;
+  const ok = await requirePin(`delete “${chore.name}”`);
+  if (!ok) return;
+  await deleteDoc(doc(db, "chores", chore.id));
+  showToast("Chore deleted");
 }
 
 // Checking off a claimed chore is what actually moves money, so it takes the
@@ -1126,11 +1186,13 @@ function renderManageChoresView() {
           <option value="daily">Resets daily</option>
           <option value="weekly">Resets weekly (Sunday)</option>
           <option value="monthly">Resets monthly (the 1st)</option>
+          <option value="once">One-time (never resets)</option>
         </select>
         <button type="submit">Add chore</button>
       </form>
       <p class="hint">Once a chore is claimed it's off the list until it resets. A parent
-      checks it off with the PIN to move the money into that account.</p>
+      checks it off with the PIN to move the money into that account. A one-time chore
+      never resets — once it's checked off it's finished, and you can remove it.</p>
     </div>
     <div class="section-title">All chores</div>
     <div class="chore-list" id="manage-chore-list"><p class="loading">Loading…</p></div>
@@ -1178,11 +1240,12 @@ function renderManageChoresView() {
       listEl.innerHTML = chores
         .map((chore) => {
           const claim = activeClaim(chore);
+          const label = `<span class="chore-period">${RESET_PERIODS[resetPeriodOf(chore)].label}</span>`;
           const status = !claim
-            ? RESET_PERIODS[resetPeriodOf(chore)].label
-            : `${RESET_PERIODS[resetPeriodOf(chore)].label} · ${claim.approved ? "done by" : "claimed by"} ${escapeHtml(claim.accountName)}`;
+            ? label
+            : `${label} · ${claim.approved ? "done by" : "claimed by"} ${escapeHtml(claim.accountName)}`;
           return `
-            <div class="chore-row" data-id="${chore.id}">
+            <div ${choreRowAttrs(chore)}>
               <span class="chore-info">
                 <span class="chore-name">${escapeHtml(chore.name)}</span>
                 <span class="chore-meta">${status}</span>
@@ -1201,23 +1264,11 @@ function renderManageChoresView() {
     }
   );
 
-  listEl.addEventListener("click", async (e) => {
+  listEl.addEventListener("click", (e) => {
     const button = e.target.closest("button[data-act='delete']");
     if (!button) return;
     const chore = chores.find((c) => c.id === button.closest(".chore-row").dataset.id);
-    if (!chore) return;
-
-    const confirmed = await openConfirmModal({
-      title: "Delete chore?",
-      message: `Remove “${chore.name}” from the chore list? Money already paid out stays put.`,
-      confirmLabel: "Delete",
-      danger: true,
-    });
-    if (!confirmed) return;
-    const ok = await requirePin(`delete “${chore.name}”`);
-    if (!ok) return;
-    await deleteDoc(doc(db, "chores", chore.id));
-    showToast("Chore deleted");
+    if (chore) deleteChore(chore);
   });
 }
 

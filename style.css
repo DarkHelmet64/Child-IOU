@@ -289,6 +289,25 @@ button:disabled { opacity: 0.5; cursor: default; }
   border-color: #c6ead6;
 }
 
+/* Frequency at a glance: a colored stripe down the left edge of the row, and the
+   same color on the frequency word under the chore's name. One-time chores are
+   green. The stripe is an inset shadow rather than a real border so that the
+   pending and done rows above can go on recoloring their own border. */
+.chore-row[data-period="daily"] { --period-color: #2059c2; }
+.chore-row[data-period="weekly"] { --period-color: #6b3fa0; }
+.chore-row[data-period="monthly"] { --period-color: #a35a00; }
+.chore-row[data-period="once"] { --period-color: #157f4a; }
+
+.chore-row[data-period] {
+  padding-left: 16px;
+  box-shadow: inset 4px 0 0 var(--period-color);
+}
+
+.chore-period {
+  color: var(--period-color);
+  font-weight: 600;
+}
+
 .chore-info { flex: 1 1 55%; min-width: 0; }
 .chore-name { display: block; font-weight: 500; }
 .chore-meta { display: block; font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
