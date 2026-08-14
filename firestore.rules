@@ -38,7 +38,9 @@ service cloud.firestore {
                              && request.resource.data.name is string
                              && request.resource.data.amountCents is int
                              && request.resource.data.amountCents > 0
-                             && request.resource.data.resetPeriod in ['daily', 'weekly', 'monthly'];
+                             && request.resource.data.resetPeriod in ['daily', 'weekly', 'monthly', 'once']
+                             && (!request.resource.data.keys().hasAny(['pastCredits'])
+                                 || request.resource.data.pastCredits is map);
       allow delete: if true;
     }
 
