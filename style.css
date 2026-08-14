@@ -310,6 +310,12 @@ button:disabled { opacity: 0.5; cursor: default; }
 button.approve { background: var(--green); }
 button.approve:active { background: #157f4a; }
 
+/* Sits under the chore list, so it stays out of the way of the rows above it. */
+.past-credit-btn {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
 .picker-list {
   display: flex;
   flex-direction: column;
@@ -394,12 +400,15 @@ button.approve:active { background: #157f4a; }
   margin: 12px 0 4px;
 }
 
-.modal input {
+.modal input,
+.modal select {
   width: 100%;
   font: inherit;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
 }
 
 .modal-actions {

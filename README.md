@@ -92,6 +92,9 @@ admin screen, tap **Manage** next to "Chores" to add one: a name, what it's
 worth, and whether it resets **daily**, **weekly** (Sunday), or **monthly**
 (the 1st). Adding or deleting a chore asks for the PIN.
 
+Chore lists are always ordered the same way: daily chores first, then weekly,
+then monthly, and alphabetically within each of those.
+
 The admin screen then lists what's available right now, in three groups:
 
 1. **Up for grabs** — tap **Claim** and pick which child is doing it. (From
@@ -109,6 +112,21 @@ records the day, week, or month it belongs to, so a chore simply becomes
 claimable again the moment the calendar rolls past that period (using the
 device's own local time). Deleting a chore doesn't touch money already paid
 out for it.
+
+### Credit for a chore that already reset
+
+A claim only covers the period it was made in, so a chore that got done
+yesterday but never checked off can't be checked off today — by then it's
+back up for grabs. **Credit a past chore**, under the chore list, pays one
+out after the fact: pick the chore, when it was done (the last 6 days for a
+daily chore, 4 weeks for a weekly one, 3 months for a monthly one), and who
+did it. From a child's own page the "who" is already known and isn't asked.
+
+It takes the PIN, like checking one off, and adds the chore's value to that
+child's balance with the date in the note ("Chore: Take out the trash
+(Aug 13)"). Each past period can only be paid once — a period someone was
+already paid for is shown greyed out with their name, whether they were paid
+by a check-off at the time or by a past credit since.
 
 ## Security note
 
